@@ -69,7 +69,10 @@ public sealed class Landing(Runway runway)
             // Join the final wherever it's lined up and near the slope (a plane 2 km out needn't go back 8 km).
             var nearSlope = Math.Abs(plane.Altitude - (touchdownAltitude + Math.Max(0, -along) * tan)) < 150;
             if ((aligned && nearSlope && along < -300 && along > -FinalDistance - 3000) ||
-                (outside && toAim < 800 && Math.Abs(Pilot.Wrap(heading - runway.Heading)) < 70))
+                // Out past the start and roughly facing the runway: join the final where it is, and let the final's
+                // centerline steering (up to 45°) line it up. Waiting to reach the exact point made it miss the point
+                // and circle back to chase it (seen by the owner).
+                (outside && Math.Abs(Pilot.Wrap(heading - runway.Heading)) < 60 && along < -3000 && Math.Abs(cross) < 4000))
                 _phase = LandingPhase.Final;
             else
             {

@@ -114,6 +114,8 @@ instruct on the same PC as both KSPs):
 
 (`rotateSpeed: 1` is the model's; `take_off` makes it 40.)
 
+![The Wingman console: RigPilot says "come back and land at KSC" in LMP chat; the model checks status and calls land](docs/console.png)
+
 ![The agent's plane touching down on KSC's runway at dusk, on the centerline](docs/landing.png)
 
 *`land` in the rig: down the glide slope to the touchdown point, 4 m off the centerline; it stopped 1,161 m down the

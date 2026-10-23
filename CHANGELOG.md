@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.3: local models)
+## 0.3.0 (2026-10-23): local models
 
 ### Added
 - **The Wingman console** (`KspWingman.exe`, `src/KspWingman.Tui`): a model on your own PC flies the agent's KSP.
@@ -27,6 +27,10 @@
 - West of KSC is land, not sea: on final, a hill closer than 80 m under the plane far out means go around.
 - A small model asked `take_off` for heading 0 from the east-west runway: it now always rolls and climbs out along the
   runway, and turns to the asked heading once airborne.
+- Quitting the console mid-landing left the plane on SAS, which held it in its descent into the hills: `/quit` now
+  warns once while the pilot is flying.
+- Joining the final only at its exact start made the plane miss the point and circle back to chase it: out past the
+  start and roughly facing the runway, it joins where it is.
 - Measured: `land` from 8 km out ended 4-5 m off the centerline at touchdown and stopped 1,161 m down the runway.
 
 ## 0.2.0 (2026-10-23): the wingman

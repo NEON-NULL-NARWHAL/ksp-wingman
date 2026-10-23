@@ -72,6 +72,12 @@ public sealed class LandingTests
         Assert.Equal(LandingPhase.ToFinal, back.Phase);
         Assert.InRange(back.Target!.Value.Heading, 30, 75); // north-east, toward the centerline 8 km out
 
+        // Turned back in and facing the runway, though not at the point: that's the final now, no chasing the point.
+        var facing = landing.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 9500, 1800, 600), heading: 70, speed: 120, heightAboveGround: 530, onGround: false);
+        Assert.Equal(LandingPhase.Final, facing.Phase);
+        landing = new Landing(Runway.Ksc);
+        landing.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 10_000, 2500, 600), heading: 30, speed: 120, heightAboveGround: 530, onGround: false);
+
         // Back inside the line again on the way in: still heading in, not out to the side point again.
         var inside = landing.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 8200, 1200, 600), heading: 45, speed: 120, heightAboveGround: 530, onGround: false);
         Assert.InRange(inside.Target!.Value.Heading, 0, 90);

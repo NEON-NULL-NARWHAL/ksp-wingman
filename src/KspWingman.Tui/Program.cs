@@ -51,12 +51,26 @@ _ = Task.Run(async () =>
 if (options.Allowed.Count > 0)
     _ = Task.Run(() => ListenToChat(tools, options, me, orders.Writer, quit.Token));
 
+var quitWarned = false;
 try
 {
     await foreach (var (from, text, fromChat) in orders.Reader.ReadAllAsync(quit.Token))
     {
         if (text.Equals("/quit", StringComparison.OrdinalIgnoreCase))
+        {
+            // Quitting stops the pilot (the MCP server goes with the console), and SAS alone held a landing plane in its
+            // descent into the hills in the rig: ask once while it's flying.
+            var pilot = (await tools.CallAsync("status", new Dictionary<string, object?>(), quit.Token))
+                .Split('\n').FirstOrDefault(l => l.StartsWith("Pilot: ", StringComparison.Ordinal)) ?? "";
+            if (!quitWarned && pilot.Length > 0 && !pilot.Contains("Not flying anything") && !pilot.Contains("Stopped") && !pilot.Contains("Landed"))
+            {
+                quitWarned = true;
+                Ui.Line("error", $"Still flying ({pilot[7..]}). Quitting leaves the plane on SAS with nobody flying it. Type /quit again to leave anyway, or land first.");
+                continue;
+            }
             break;
+        }
+        quitWarned = false;
         if (text.Equals("/forget", StringComparison.OrdinalIgnoreCase))
         {
             agent.Forget();
