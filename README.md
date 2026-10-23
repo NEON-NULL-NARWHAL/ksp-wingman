@@ -12,7 +12,7 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 > [!NOTE]
 > **Version 0.3: local models.** The agent chats, takes off, flies where it's told, flies formation on you and lands
 > on KSC's runway, and a model on your own PC can be the pilot (the Wingman console, below). Next: taking over a
-> craft you hand it, missions you approve, rescues ([research notes](docs/RESEARCH.md)).
+> craft you hand it, missions you approve, rescues ([research notes](docs/RESEARCH.md), [working on next](docs/NEXT.md)).
 
 ![The agent's plane (front) flying formation on another player's, over the sea east of KSC](docs/formation.png)
 
