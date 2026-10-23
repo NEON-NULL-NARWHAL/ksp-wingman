@@ -10,8 +10,9 @@ locks, so it can only ever fly its own craft. It talks with you in LMP's chat.
 A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control).
 
 > [!NOTE]
-> **Version 0.2: the wingman.** The agent chats in LMP's chat, takes a plane off the runway, flies where it's told,
-> and flies formation on you. Next: rescues, tankers, docking help.
+> **Version 0.3: local models.** The agent chats, takes off, flies where it's told, flies formation on you and lands
+> on KSC's runway, and a model on your own PC can be the pilot (the Wingman console, below). Next: taking over a
+> craft you hand it, missions you approve, rescues ([research notes](docs/RESEARCH.md)).
 
 ![The agent's plane (front) flying formation on another player's, over the sea east of KSC](docs/formation.png)
 
@@ -61,9 +62,10 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 |---|---|
 | `launchable_craft` | The craft the agent's KSP can launch, from the VAB and the SPH. |
 | `launch` | Launches a craft onto the runway (planes, rovers) or the launch pad (rockets). |
-| `take_off` | Takes a plane off the runway: rolls straight on the nose wheel, lifts off at takeoff speed, gear up, climbs out. |
+| `take_off` | Takes a plane off the runway: rolls straight on the nose wheel, lifts off at takeoff speed, gear up, climbs out, then flies on at the heading, altitude and speed given. |
 | `fly` | Flies the plane at a heading, altitude and speed, and keeps it there. Turns by banking, at most 30°. |
 | `follow` | Formation on another player: a slot to their right, behind, above (default 40 m right, 50 m behind), never closer than 30 m. From further than 2 km it flies straight at them first (even head-on), and closes no faster than it can slow down again. |
+| `land` | Lands on KSC's runway from anywhere in the air: out to the final approach 8 km west of KSC, down a 4° glide slope, flare, roll out on the centerline, brakes. Goes around by itself if it isn't lined up. |
 | `stop_following` | Holds the current heading, height and speed. |
 | `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
 
@@ -78,6 +80,49 @@ mid-flight, it turns SAS on first.
 
 **Guardrails, built into the bridge:** chat lines are one line, at most 300 characters, at most one a second. The agent
 only ever controls its own KSP; LMP's locks keep it off everyone else's vessels.
+
+## The Wingman console: local models (0.3)
+
+`KspWingman.exe` lets a model on your own PC fly: [Ollama](https://ollama.com), llama.cpp's `llama-server`, or any
+server with the OpenAI chat API. It starts `KspWingman.Mcp.exe` (put both in one folder) and uses the same tools.
+
+```
+KspWingman --model qwen3:4b-instruct --krpc-port 50000 --allow "YourName,FriendName"
+```
+
+- **Orders** come from the console (type "take off and fly east at 1000 m") or from LMP's chat: players on `--allow`
+  start a line with the call sign, `Wingman, follow me` (`--call-sign` changes it). The answer goes back where the order
+  came from. No `--allow`, no chat orders.
+- `--llm http://127.0.0.1:8080/v1/` for llama.cpp; `--api-key` for a server that wants one. `/status`, `/forget`,
+  `/quit` in the console.
+A real session in the test rig (another player, RigPilot, giving orders in LMP's chat; the model is Qwen3 4B
+instruct on the same PC as both KSPs):
+
+```
+08:35:21 you  Commander: launch a new plane, take off and fly north at 800 meters
+08:35:21 tool launchable_craft({})
+08:35:22 tool launch({"craft":"Aeris 3A","site":"Runway"})
+08:35:32 tool take_off({"heading":0,"rotateSpeed":1,"climbPitch":10,"altitude":800})
+08:35:49   -> Airborne: 100 m above the ground at 130 m/s on heading 0°, gear up. Now flying on: heading 0°, 800 m, 150 m/s.
+08:35:49 ai   Flying north at 800 meters altitude, heading 0°. Ready for your next command!
+08:36:33 chat RigPilot: climb to 1500 m and turn east
+08:36:33 tool fly({"heading":90,"altitude":1500,"speed":150})
+08:36:33 ai   Climbed to 1500 meters and turned east. Ready for your next command!
+08:46:40 chat RigPilot: come back and land at KSC
+08:46:41 tool land({"runway":"KSC"})
+```
+
+(`rotateSpeed: 1` is the model's; `take_off` makes it 40.)
+
+![The agent's plane touching down on KSC's runway at dusk, on the centerline](docs/landing.png)
+
+*`land` in the rig: down the glide slope to the touchdown point, 4 m off the centerline; it stopped 1,161 m down the
+runway.*
+
+- **Which model:** a small non-thinking one. On a 16 GB card next to KSP, `qwen3:4b-instruct` (3 GB) answers in about
+  a second and passed 21 of 21 orders in our eval (in the game it missed one of five: it answered "come back and land" with `fly` once, and with `land` when asked again); thinking models take 20+ s per answer. The console helps small
+  models along: it reads tool calls they write out as text, and when one says "Following you!" without calling
+  `follow`, it tells it so. `tests/ModelEval` tries any model on the same orders without KSP.
 
 ## How it works
 

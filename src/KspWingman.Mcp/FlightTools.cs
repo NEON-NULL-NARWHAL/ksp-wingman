@@ -50,6 +50,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
             return $"Not launched: no craft called \"{craft}\" in the {directory}. Craft there: {string.Join(", ", space.LaunchableVessels(directory))}.";
         space.LaunchVessel(directory, craft, directory == "VAB" ? "LaunchPad" : "Runway", null, true, "");
         return $"Launching {craft} on the {(directory == "VAB" ? "launch pad" : "runway")}. It takes a few seconds; then status shows it. " +
+               (directory == "SPH" ? "It's on the ground, not flying: next, take_off. " : "It's on the pad: next, stage to launch. ") +
                "Mind LMP's safety bubble: other players can't see the agent within 100 m of the pad or the runway start.";
     });
 
@@ -59,7 +60,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
         "(KSC is about 70 m up). A stock jet flies well at 120-200 m/s.")]
     public string Fly(
         [Description("Compass heading in degrees (0 north, 90 east).")] double heading,
-        [Description("Altitude in metres above sea level.")] double altitude,
+        [Description("Altitude in meters above sea level.")] double altitude,
         [Description("Speed in m/s.")] double speed = 150) => krpc.Run(connection =>
     {
         var vessel = InFlight(connection, out var problem);
@@ -82,9 +83,9 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
         "status says how close to the slot it is.")]
     public string Follow(
         [Description("The player's name, as players lists it.")] string player,
-        [Description("Metres to their right (negative: to their left).")] double right = 40,
-        [Description("Metres behind them.")] double behind = 50,
-        [Description("Metres above them (negative: below).")] double up = 0) => krpc.Run(connection =>
+        [Description("Meters to their right (negative: to their left).")] double right = 40,
+        [Description("Meters behind them.")] double behind = 50,
+        [Description("Meters above them (negative: below).")] double up = 0) => krpc.Run(connection =>
     {
         var vessel = InFlight(connection, out var problem);
         if (vessel == null)
@@ -93,7 +94,27 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
             return "Not from the ground: take_off first.";
         if (krpc.Wingman<IList<double>>("PlayerPosition", player).Count < 3)
             return $"{player} has no vessel in this game right now (players shows who's flying what).";
+        // A slot on top of them is no slot (a small model passed 0, 0): the default one instead.
+        if (Math.Sqrt(right * right + behind * behind + up * up) < Formation.MinSeparation)
+            (right, behind, up) = (40, 50, 0);
         director.Follow(player, new Slot(right, behind, up));
+        return director.Doing;
+    });
+
+    [McpServerTool(Name = "land"), Description(
+        "Lands the agent's plane (in the air) on a runway: flies to the final approach 8 km out, down a 4° glide slope, " +
+        "flares, rolls out and stops with the brakes on. Goes around by itself if it isn't lined up. Takes a few minutes; " +
+        "status shows how it's going. Runways: \"KSC\" (the Space Center's, landing east).")]
+    public string Land([Description("Which runway: \"KSC\".")] string runway = "KSC") => krpc.Run(connection =>
+    {
+        var vessel = InFlight(connection, out var problem);
+        if (vessel == null)
+            return problem!;
+        if (vessel.Situation is VesselSituation.PreLaunch or VesselSituation.Landed or VesselSituation.Splashed)
+            return "Already on the ground (or in the sea): land is for a plane in the air.";
+        if (Runway.Find(runway) is not { } found)
+            return $"No runway called \"{runway}\". Known: KSC.";
+        director.Land(found);
         return director.Doing;
     });
 
@@ -160,17 +181,24 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
     });
 
     [McpServerTool(Name = "take_off"), Description(
-        "Takes a plane off the runway and climbs out, then holds the climb on the autopilot. Runs by itself (about a minute) " +
-        "and reports how it went. Use it right after launch on the Runway. Planes only: the craft needs wheels and wings.")]
+        "Takes a plane off the runway, climbs out and then flies on at the heading, altitude and speed given (no fly needed " +
+        "after it). Runs by itself (about a minute) and reports how it went. Use it right after launch on the Runway. " +
+        "Planes only: the craft needs wheels and wings.")]
     public async Task<string> TakeOff(
-        [Description("Compass heading to take off on (the runway runs 90, east).")] double heading = 90,
+        [Description("Compass heading to fly on once airborne (it always takes off straight along the runway first).")] double heading = 90,
         [Description("Speed (m/s) to lift the nose at.")] double rotateSpeed = 55,
         [Description("Pitch (degrees) to climb at.")] double climbPitch = 12,
+        [Description("Altitude (m above sea level) to fly at afterwards; leave out for 500 m above the ground.")] double? altitude = null,
+        [Description("Speed (m/s) to fly at afterwards.")] double speed = 150,
         CancellationToken cancel = default)
     {
         var vessel = krpc.Run(connection => InFlight(connection, out _));
         if (vessel == null)
             return "Not flying: launch a plane on the Runway first.";
+        // Whatever the agent asked for, within what a plane can do (a small model once asked to rotate at 5 m/s).
+        heading = (heading % 360 + 360) % 360;
+        rotateSpeed = Math.Clamp(rotateSpeed, 40, 90);
+        climbPitch = Math.Clamp(climbPitch, 5, 20);
         var (control, autopilot, space) = krpc.Run(c => (vessel.Control, vessel.AutoPilot, c.SpaceCenter()));
         var surface = vessel.SurfaceReferenceFrame;
         var ground = vessel.Orbit.Body.ReferenceFrame;
@@ -184,24 +212,27 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
                 control.ActivateNextStage();
             return 0;
         });
+        // Roll and climb out the way the plane points (along the runway); turn to the asked heading only once flying. A
+        // small model asked for heading 0 from KSC's east-west runway, which would steer it off the side.
+        var runway = krpc.Run(_ => vessel.Flight(surface).Heading);
         var start = DateTime.UtcNow;
         var rotated = false;
         while (DateTime.UtcNow - start < TimeSpan.FromSeconds(90))
         {
-            var (speed, height, actual) = krpc.Run(_ => (vessel.Flight(ground).Speed, vessel.Flight(ground).SurfaceAltitude, vessel.Flight(surface).Heading));
+            var (rollSpeed, height, actual) = krpc.Run(_ => (vessel.Flight(ground).Speed, vessel.Flight(ground).SurfaceAltitude, vessel.Flight(surface).Heading));
             if (!rotated)
             {
                 // Steer the nose wheel back onto the heading: a few degrees off is a gentle push, never full lock.
-                var error = ((heading - actual + 540) % 360) - 180;
+                var error = ((runway - actual + 540) % 360) - 180;
                 krpc.Run(_ => control.WheelSteering = (float)Math.Clamp(-error / 10, -0.5, 0.5));
-                if (speed >= rotateSpeed)
+                if (rollSpeed >= rotateSpeed)
                 {
                     rotated = true;
                     krpc.Run(_ =>
                     {
                         control.WheelSteering = 0;
                         control.SAS = false;
-                        autopilot.TargetPitchAndHeading((float)climbPitch, (float)heading);
+                        autopilot.TargetPitchAndHeading((float)climbPitch, (float)runway);
                         autopilot.Engaged = true;
                         return 0;
                     });
@@ -210,10 +241,12 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
             else if (height > 100)
             {
                 krpc.Run(_ => control.Gear = false);
-                // From here our own pilot flies: climb out to 500 m above the ground on the same heading.
+                // From here our own pilot flies, to the asked heading and altitude (500 m above the ground if none).
                 var sea = krpc.Run(_ => vessel.Flight(ground).MeanAltitude - height);
-                director.Hold(new PlaneTarget(heading, sea + 500, 150));
-                return Airborne(height, speed, climbPitch, heading);
+                var cruise = Math.Max(altitude ?? sea + 500, sea + 150);
+                var cruiseSpeed = Math.Clamp(speed, 60, 400);
+                director.Hold(new PlaneTarget(heading, cruise, cruiseSpeed));
+                return Airborne(height, rollSpeed, heading, cruise, cruiseSpeed);
             }
             await Task.Delay(100, cancel);
         }
@@ -221,8 +254,9 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
         return NotAirborne(lastSpeed, lastHeight, rotated);
     }
 
-    private static string Airborne(double height, double speed, double pitch, double heading) => string.Create(CultureInfo.InvariantCulture,
-        $"Airborne: {height:0} m above the ground at {speed:0} m/s on heading {heading:0}°, gear up. Climbing out to 500 m above the ground at 150 m/s; then fly or follow.");
+    private static string Airborne(double height, double speed, double heading, double cruise, double cruiseSpeed) => string.Create(CultureInfo.InvariantCulture,
+        $"Airborne: {height:0} m above the ground at {speed:0} m/s on heading {heading:0}°, gear up. Now flying on: heading {heading:0}°, " +
+        $"{cruise:0} m, {cruiseSpeed:0} m/s. Use fly, follow or land to change that.");
 
     private static string NotAirborne(double speed, double height, bool rotated) => string.Create(CultureInfo.InvariantCulture,
         $"Didn't get airborne in 90 s: {speed:0} m/s, {height:0} m above the ground ({(rotated ? "nose lifted, but no climb" : "never reached rotate speed")}). Try stop_flying, then recover.");

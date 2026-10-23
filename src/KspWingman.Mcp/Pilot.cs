@@ -7,8 +7,11 @@ namespace KspWingman.Mcp;
 /// <summary>What the pilot reads each tick: angles in degrees, speeds in m/s, altitude above sea level in m.</summary>
 public readonly record struct PlaneState(double Pitch, double Roll, double Heading, double VerticalSpeed, double Altitude, double Speed, double HeightAboveGround = double.MaxValue);
 
-/// <summary>What it asks for: heading (degrees), altitude (m above sea level), speed (m/s).</summary>
-public readonly record struct PlaneTarget(double Heading, double Altitude, double Speed);
+/// <summary>
+/// What it asks for: heading (degrees), altitude (m above sea level), speed (m/s). A climb rate (m/s) replaces the
+/// altitude when given (a glide slope, a flare). Landing turns off the "too low, pull up" rule and banks at most 20°.
+/// </summary>
+public readonly record struct PlaneTarget(double Heading, double Altitude, double Speed, double? ClimbRate = null, bool Landing = false);
 
 /// <summary>Control inputs, kRPC's ranges: pitch and roll -1..1 (positive is nose up and roll right), throttle 0..1.</summary>
 public readonly record struct PlaneInputs(float Pitch, float Roll, float Yaw, float Throttle);
@@ -45,10 +48,10 @@ public sealed class Pilot
         var authority = Math.Clamp(Math.Pow(TunedSpeed / Math.Max(s.Speed, 30), 2), 0.15, 2);
 
         // Too low and going down: wings level and climb, whatever was asked.
-        var tooLow = s.HeightAboveGround < SafeHeight && s.VerticalSpeed < 0;
+        var tooLow = !t.Landing && s.HeightAboveGround < SafeHeight && s.VerticalSpeed < 0;
 
         // Altitude → climb rate → pitch. Banked, a plane needs a little more pitch to hold its height.
-        var climb = Math.Clamp(0.15 * (t.Altitude - s.Altitude), -MaxClimbRate, MaxClimbRate);
+        var climb = Math.Clamp(t.ClimbRate ?? 0.15 * (t.Altitude - s.Altitude), -MaxClimbRate, MaxClimbRate);
         var pitchTarget = Math.Clamp(2 + 0.6 * (climb - s.VerticalSpeed), MaxPitchDown, MaxPitchUp);
         if (tooLow)
             pitchTarget = Math.Max(pitchTarget, 10);
@@ -57,7 +60,8 @@ public sealed class Pilot
         var elevator = authority * (0.012 * pitchError - 0.006 * pitchRate) + _pitchTrim;
 
         // Heading → bank → ailerons.
-        var bankTarget = tooLow ? 0 : Math.Clamp(1.2 * Wrap(t.Heading - s.Heading), -MaxBank, MaxBank);
+        var maxBank = t.Landing ? 20 : MaxBank;
+        var bankTarget = tooLow ? 0 : Math.Clamp(1.2 * Wrap(t.Heading - s.Heading), -maxBank, maxBank);
         var aileron = authority * (0.006 * Wrap(bankTarget - s.Roll) - 0.003 * rollRate);
 
         // Speed → throttle (slow and smooth). In a big turn, slow down first: at 270 m/s a 30° bank turns 13 km wide, and

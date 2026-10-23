@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\KspWingman.Mcp\KspWingman.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\KspWingman.Tui\KspWingman.Tui.csproj" />
     <!-- The bridge's chat numbering has no KSP types, so it's compiled and tested here (the bridge itself is a KSP mod). -->
     <Compile Include="..\..\src\KspWingman.Bridge\ChatLog.cs" Link="ChatLog.cs" />
   </ItemGroup>

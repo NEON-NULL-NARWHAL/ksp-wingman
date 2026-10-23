@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/KspWingman.Bridge/KspWingman.Bridge.csproj" />
     <Project Path="src/KspWingman.Mcp/KspWingman.Mcp.csproj" />
+    <Project Path="src/KspWingman.Tui/KspWingman.Tui.csproj" />
   </Folder>
   <Folder Name="/src/Stubs/">
     <Project Path="src/Stubs/AssemblyCSharp/AssemblyCSharp.csproj" />
@@ -10,5 +11,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/KspWingman.Tests/KspWingman.Tests.csproj" />
+    <Project Path="tests/ModelEval/ModelEval.csproj" />
   </Folder>
 </Solution>

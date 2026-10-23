@@ -62,6 +62,24 @@ public sealed class Director(string host, int port) : IDisposable
         }, $"Following {player}: looking for them.");
     }
 
+    /// <summary>Lands on a runway (from anywhere in the air), rolls out and stops with the brakes on.</summary>
+    public void Land(Runway runway)
+    {
+        var landing = new Landing(runway);
+        Start(link =>
+        {
+            var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
+            var (g, f) = link.Run(_ => (vessel.Flight(vessel.Orbit.Body.ReferenceFrame), vessel.Flight(vessel.SurfaceReferenceFrame)));
+            var radius = link.Run(_ => vessel.Orbit.Body.EquatorialRadius);
+            var me = new Geo(link.Run(_ => g.Latitude), link.Run(_ => g.Longitude), link.Run(_ => g.MeanAltitude));
+            var step = landing.Step(radius, me, link.Run(_ => f.Heading), link.Run(_ => g.Speed), link.Run(_ => g.SurfaceAltitude), onGround: false);
+            if (step.Phase is LandingPhase.Final or LandingPhase.Flare)
+                link.Run(_ => { if (!vessel.Control.Gear) vessel.Control.Gear = true; return 0; });
+            _doing = step.Doing;
+            return step.Target;
+        }, $"Landing on {runway.Name}: working out the approach.", landing);
+    }
+
     public void Stop()
     {
         lock (_gate)
@@ -72,7 +90,7 @@ public sealed class Director(string host, int port) : IDisposable
         _doing = "Not flying anything.";
     }
 
-    private void Start(Func<KrpcLink, PlaneTarget?> target, string doing)
+    private void Start(Func<KrpcLink, PlaneTarget?> target, string doing, Landing? landing = null)
     {
         Stop();
         CancellationTokenSource stop;
@@ -88,7 +106,12 @@ public sealed class Director(string host, int port) : IDisposable
         {
             try
             {
-                await Fly(link, target, stop.Token);
+                await Fly(link, target, landing, stop.Token);
+                lock (_gate)
+                {
+                    if (_stop == stop)
+                        _stop = null; // done (landed and stopped)
+                }
             }
             catch (OperationCanceledException)
             {
@@ -105,7 +128,7 @@ public sealed class Director(string host, int port) : IDisposable
         });
     }
 
-    private static async Task Fly(KrpcLink link, Func<KrpcLink, PlaneTarget?> target, CancellationToken stop)
+    private async Task Fly(KrpcLink link, Func<KrpcLink, PlaneTarget?> target, Landing? landing, CancellationToken stop)
     {
         var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
         var control = link.Run(_ => vessel.Control);
@@ -126,6 +149,13 @@ public sealed class Director(string host, int port) : IDisposable
                 link.Run(_ => { if (control.SAS) control.SAS = false; if (vessel.AutoPilot.Engaged) vessel.AutoPilot.Engaged = false; return 0; });
             }
             var situation = link.Run(_ => vessel.Situation);
+            if (situation == VesselSituation.Landed && landing != null)
+            {
+                if (Rollout(link, vessel, landing))
+                    return;
+                await Task.Delay(50, stop);
+                continue;
+            }
             if (situation is VesselSituation.Landed or VesselSituation.Splashed or VesselSituation.PreLaunch)
                 throw new WingmanException($"the vessel is {situation.ToString().ToLowerInvariant()}: the pilot flies in the air only.");
             var (f, g) = link.Run(_ => (vessel.Flight(surface), vessel.Flight(ground)));
@@ -139,8 +169,41 @@ public sealed class Director(string host, int port) : IDisposable
             }
             await Task.Delay(50, stop);
         }
-        // Stick centred; SAS is left to whoever comes next (another mode, or stop_flying, which turns it on).
+        // Stick centered; SAS is left to whoever comes next (another mode, or stop_flying, which turns it on).
         link.Run(_ => { control.Pitch = 0; control.Roll = 0; control.Yaw = 0; return 0; });
+    }
+
+    /// <summary>On the runway after a landing: throttle shut, brakes, nose wheel on the centerline. True once stopped.</summary>
+    private bool Rollout(KrpcLink link, Vessel vessel, Landing landing)
+    {
+        var (g, f) = link.Run(_ => (vessel.Flight(vessel.Orbit.Body.ReferenceFrame), vessel.Flight(vessel.SurfaceReferenceFrame)));
+        var radius = link.Run(_ => vessel.Orbit.Body.EquatorialRadius);
+        var me = new Geo(link.Run(_ => g.Latitude), link.Run(_ => g.Longitude), link.Run(_ => g.MeanAltitude));
+        var speed = link.Run(_ => g.Speed);
+        var step = landing.Step(radius, me, link.Run(_ => f.Heading), speed, 0, onGround: true);
+        var headingError = Pilot.Wrap(landing.Runway.Heading - link.Run(_ => f.Heading));
+        // Back onto the centerline gently: a few degrees of heading for every 10 m off, like take_off's steering.
+        var steer = Math.Clamp(-(headingError + Math.Clamp(-step.Cross / 10, -5, 5)) / 10, -0.5, 0.5);
+        var roll = link.Run(_ => f.Roll);
+        link.Run(_ =>
+        {
+            var c = vessel.Control;
+            c.Throttle = 0;
+            c.Pitch = 0;
+            c.Yaw = 0;
+            c.Roll = (float)Math.Clamp(-0.01 * roll, -0.2, 0.2);
+            c.WheelSteering = (float)steer;
+            c.Brakes = speed < 70; // full brakes at touchdown speed can tip the nose over
+            return 0;
+        });
+        _doing = step.Doing;
+        if (speed > 1)
+            return false;
+        link.Run(_ => { vessel.Control.Brakes = true; vessel.Control.WheelSteering = 0; return 0; });
+        _doing = string.Create(CultureInfo.InvariantCulture,
+            $"Landed on {landing.Runway.Name} and stopped, brakes on: {step.Along + Landing.TouchdownAfterThreshold:0} m down the runway, " +
+            $"{Math.Abs(step.Cross):0} m off the centerline. recover or take_off from here.");
+        return true;
     }
 
     public void Dispose()
@@ -152,7 +215,7 @@ public sealed class Director(string host, int port) : IDisposable
         {
             try
             {
-                Thread.Sleep(200); // let the loop centre the stick first
+                Thread.Sleep(200); // let the loop center the stick first
                 _link?.Run(c => { c.SpaceCenter().ActiveVessel.Control.SAS = true; return 0; });
             }
             catch (Exception)

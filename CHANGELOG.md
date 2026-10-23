@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased (0.3: local models)
+
+### Added
+- **The Wingman console** (`KspWingman.exe`, `src/KspWingman.Tui`): a model on your own PC flies the agent's KSP.
+  Any OpenAI-compatible server: Ollama, llama.cpp's `llama-server`, others. It starts `KspWingman.Mcp.exe` and uses
+  the same tools. Orders from the console, or from LMP's chat by players on `--allow` who start with the call sign
+  ("Wingman, land"); the answer goes back the same way.
+- **`land`**: KSC's runway from anywhere in the air (final approach 8 km west of KSC, 4° glide slope, flare,
+  rollout on the centerline, brakes; goes around by itself when it isn't lined up).
+- `take_off` takes the altitude and speed to fly on at afterwards (one call for "take off and fly east at 1000 m").
+- `tests/ModelEval`: tries a model on seven orders with the real tool list and scripted game answers, no KSP.
+- `docs/RESEARCH.md`: ship takeover, mission control, crew rescue, the shared knowledge store, a craft generator.
+
+### Changed (for small models, from the eval)
+- Tool calls written out as text are read as calls; an answer that claims an action whose tool wasn't called gets a
+  reminder, and the second time only that tool is offered (Ollama ignores `tool_choice`).
+- Tools clamp silly numbers: `take_off` rotates at 40-90 m/s, a `follow` slot can't sit on top of the leader.
+- `launch` says what comes next (`take_off`, or `stage` on the pad).
+- Chat answers are one line without emoji (KSP's font has none); answers say what's happening, not that it's done.
+
+### Found in the rig (and fixed)
+- Flown straight at the start of the final, the plane got there heading the wrong way and its 180° turn ended 4 km
+  off the centerline: `land` now flies a circuit (out past the start and to the side, then back in), latched so it
+  doesn't turn back and forth across the line, and joins the centerline at up to 45° far out.
+- West of KSC is land, not sea: on final, a hill closer than 80 m under the plane far out means go around.
+- A small model asked `take_off` for heading 0 from the east-west runway: it now always rolls and climbs out along the
+  runway, and turns to the asked heading once airborne.
+- Measured: `land` from 8 km out ended 4-5 m off the centerline at touchdown and stopped 1,161 m down the runway.
+
 ## 0.2.0 (2026-10-23): the wingman
 
 ### Added

@@ -63,9 +63,9 @@ public class FlyingTests
         // The leader flies east at 150 m/s (1 s apart); the agent is exactly in the slot (40 m right = south, 50 m behind).
         var formation = new Formation();
         var leader0 = new Geo(0, -74.6, 1000);
-        var metresPerDegree = Kerbin * Math.PI / 180;
-        var leader1 = leader0 with { Longitude = leader0.Longitude + 150 / metresPerDegree };
-        var agent = new Geo(-40 / metresPerDegree, leader1.Longitude - 50 / metresPerDegree, 1000);
+        var metersPerDegree = Kerbin * Math.PI / 180;
+        var leader1 = leader0 with { Longitude = leader0.Longitude + 150 / metersPerDegree };
+        var agent = new Geo(-40 / metersPerDegree, leader1.Longitude - 50 / metersPerDegree, 1000);
         Assert.Null(formation.Step(Kerbin, agent, leader0, 1, new Slot(40, 50, 0))); // one point: no heading yet
         var step = formation.Step(Kerbin, agent, leader1, 1, new Slot(40, 50, 0));
         // One move of 150 m in 1 s, smoothed at 0.3: the leader seems to fly 45 m/s east, so the agent is told to go east.
@@ -79,10 +79,10 @@ public class FlyingTests
     public void Formation_never_lets_the_agent_get_closer_than_the_separation()
     {
         var formation = new Formation();
-        var metresPerDegree = Kerbin * Math.PI / 180;
+        var metersPerDegree = Kerbin * Math.PI / 180;
         var leader0 = new Geo(0, 0, 1000);
-        var leader1 = leader0 with { Longitude = 100 / metresPerDegree };
-        var tooClose = new Geo(0, leader1.Longitude - 10 / metresPerDegree, 1000); // 10 m behind them
+        var leader1 = leader0 with { Longitude = 100 / metersPerDegree };
+        var tooClose = new Geo(0, leader1.Longitude - 10 / metersPerDegree, 1000); // 10 m behind them
         formation.Step(Kerbin, tooClose, leader0, 1, new Slot(0, 5, 0));
         var step = formation.Step(Kerbin, tooClose, leader1, 1, new Slot(0, 5, 0))!.Value;
         Assert.True(step.Target.Altitude >= 1000 + Formation.MinSeparation, "climbs above them");
@@ -93,10 +93,10 @@ public class FlyingTests
     {
         // The leader flies east; the agent is 10 km ahead of them and 5 km north: it turns toward them, not east.
         var formation = new Formation();
-        var metresPerDegree = Kerbin * Math.PI / 180;
+        var metersPerDegree = Kerbin * Math.PI / 180;
         var leader0 = new Geo(0, 0, 1000);
-        var leader1 = leader0 with { Longitude = 150 / metresPerDegree };
-        var agent = new Geo(5000 / metresPerDegree, leader1.Longitude + 10000 / metresPerDegree, 1000);
+        var leader1 = leader0 with { Longitude = 150 / metersPerDegree };
+        var agent = new Geo(5000 / metersPerDegree, leader1.Longitude + 10000 / metersPerDegree, 1000);
         formation.Step(Kerbin, agent, leader0, 1, new Slot(40, 50, 0));
         var step = formation.Step(Kerbin, agent, leader1, 1, new Slot(40, 50, 0))!.Value;
         Assert.InRange(step.Target.Heading, 235, 250); // south-west, at the slot
@@ -104,7 +104,7 @@ public class FlyingTests
 
         // Far behind them: as fast as allowed, never more.
         formation = new Formation();
-        var behind = new Geo(0, leader0.Longitude - 20000 / metresPerDegree, 1000);
+        var behind = new Geo(0, leader0.Longitude - 20000 / metersPerDegree, 1000);
         formation.Step(Kerbin, behind, leader0, 1, new Slot(40, 50, 0));
         Assert.Equal(Formation.MaxSpeed, formation.Step(Kerbin, behind, leader1, 1, new Slot(40, 50, 0))!.Value.Target.Speed);
     }

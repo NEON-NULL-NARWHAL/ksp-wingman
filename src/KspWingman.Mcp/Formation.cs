@@ -4,10 +4,10 @@
 
 namespace KspWingman.Mcp;
 
-/// <summary>A position over a body: degrees and metres above sea level.</summary>
+/// <summary>A position over a body: degrees and meters above sea level.</summary>
 public readonly record struct Geo(double Latitude, double Longitude, double Altitude);
 
-/// <summary>Where the agent sits relative to the leader, in metres: to their right (negative: left), behind, above.</summary>
+/// <summary>Where the agent sits relative to the leader, in meters: to their right (negative: left), behind, above.</summary>
 public readonly record struct Slot(double Right, double Behind, double Up);
 
 /// <summary>One step's answer: what to fly, and how far the agent is from its slot and from the leader.</summary>
@@ -72,7 +72,7 @@ public sealed class Formation
 
         var headingDeg = heading * 180 / Math.PI;
         // Aim at a point about 3 s ahead on the slot's line: a plane needs seconds to bank, and aiming 150 m ahead made
-        // the agent weave across the leader's track for kilometres.
+        // the agent weave across the leader's track for kilometers.
         var turn = Math.Clamp(Math.Atan2(across, Math.Max(3 * leaderSpeed, 300)) * 180 / Math.PI, -40, 40);
         // Catch up no faster than it can slow down again by the slot (a jet with the throttle shut loses under 1 m/s each
         // second): at 2 km behind, 57 m/s quicker; at 200 m, 18.
