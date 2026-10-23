@@ -82,3 +82,22 @@ docking. LMP already supports a clean hand-off, no protocol change:
   https://www.jdhodges.com/blog/local-llms-on-tool-calling-2026-pt1-local-lm/ (blogs; our own eval is what counts).
 - `.craft` format notes: https://forum.kerbalspaceprogram.com/topic/51800-any-doco-on-the-craft-file-format
 - LMP 0.29.2: `LmpClient/Systems/VesselLockSys/VesselLockEvents.cs`, `LmpClient/Systems/Lock/LockSystem.cs`.
+
+## Gemma 4 E4B as one model that plans and flies (to test, 2026-10-23)
+
+Why it's interesting: one small model doing both roles (thinking planner and fast pilot) would keep the console simple
+and leave room on the GPU for two KSPs. What the write-ups say (not yet checked here):
+
+- About 4.5B effective parameters (about 8B with embeddings), a 128K-token context, text and images in.
+- Native tool calling (its own tool-call tokens); thinking can be switched on or off, and on E4B it can be fully off.
+- On Ollama as `gemma4:e4b`. One write-up says Ollama turns thinking on by default; check it. Memory figures conflict
+  (6 GB minimum system memory is quoted); measure VRAM next to both rig KSPs.
+
+How we'd test it (with SUPPORT TOOLS): ModelEval with thinking off (as the pilot: right tool, seconds per order) and on
+(as the planner: valid plans), then one rig KSP on Gemma 4 E4B as the single model and the other on Qwen3 4B instruct
+plus a thinking planner, flying the same tower mission at the same time (RigRun head to head, REPORT.md rows, GIFs). A
+vision test: the planner also gets a window capture of the agent's KSP. Pass mark: 24/24 in the eval, a first-try
+approach and landing in the rig, both KSPs still smooth.
+
+Sources: https://recipes.vllm.ai/Google/gemma-4-E4B-it, https://registry.ollama.ai/library/gemma4,
+https://www.lmstudio.ai/models/google/gemma-4-e4b, https://skills.cat/skills/luckyegg168/gemma-4
