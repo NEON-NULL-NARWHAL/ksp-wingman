@@ -97,6 +97,11 @@ namespace KspWingman.Bridge
             return others.Count == 0 ? 0 : Math.Max(0, others.Max() - mine);
         }
 
+        /// <summary>A stock name as KSP shows it: "#autoLOC_501174" → "Aeris 3A" (other text is returned as is).</summary>
+        [KRPCProcedure]
+        public static string Localize(string text) =>
+            text != null && text.StartsWith("#autoLOC", StringComparison.Ordinal) ? KSP.Localization.Localizer.Format(text) : text ?? "";
+
         /// <summary>No tabs or line breaks inside a field (they separate fields and lines).</summary>
         private static string Clean(string text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
     }

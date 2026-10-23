@@ -29,11 +29,12 @@ public sealed class Tools(KrpcLink krpc)
         {
             var vessel = connection.SpaceCenter().ActiveVessel;
             var body = vessel.Orbit.Body;
-            var flight = vessel.Flight(body.ReferenceFrame);
-            text.AppendLine($"Vessel: {vessel.Name} ({vessel.Situation}) at {body.Name}");
+            var flight = vessel.Flight(body.ReferenceFrame); // speeds relative to the ground
+            var attitude = vessel.Flight(vessel.SurfaceReferenceFrame); // heading and pitch against the horizon
+            text.AppendLine($"Vessel: {Name(vessel.Name)} ({vessel.Situation}) at {body.Name}");
             text.AppendLine(string.Create(CultureInfo.InvariantCulture,
                 $"Altitude {flight.MeanAltitude:0} m (above ground {flight.SurfaceAltitude:0} m) · speed {flight.Speed:0.0} m/s · " +
-                $"heading {flight.Heading:0}° · pitch {flight.Pitch:0}° · lat {flight.Latitude:0.0000} lon {flight.Longitude:0.0000}"));
+                $"heading {attitude.Heading:0}° · pitch {attitude.Pitch:0}° · lat {flight.Latitude:0.0000} lon {flight.Longitude:0.0000}"));
         }
         var behind = krpc.Wingman<double>("SecondsBehind");
         if (behind > 1)
@@ -81,6 +82,19 @@ public sealed class Tools(KrpcLink krpc)
             if (DateTime.UtcNow >= until)
                 return lines.Count == 0 ? "No new chat." : Format(lines) + "\n(only your own lines; no one else said anything)";
             await Task.Delay(1000, cancel);
+        }
+    }
+
+    /// <summary>A stock vessel's name as KSP shows it; an older bridge without Localize gets the name as is.</summary>
+    private string Name(string raw)
+    {
+        try
+        {
+            return krpc.Wingman<string>("Localize", raw);
+        }
+        catch (WingmanException)
+        {
+            return raw;
         }
     }
 
