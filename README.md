@@ -10,9 +10,10 @@ locks, so it can only ever fly its own craft. It talks with you in LMP's chat.
 A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control).
 
 > [!NOTE]
-> **Version 0.3: local models.** The agent chats, takes off, flies where it's told, flies formation on you and lands
-> on KSC's runway, and a model on your own PC can be the pilot (the Wingman console, below). Next: taking over a
-> craft you hand it, missions you approve, rescues ([research notes](docs/RESEARCH.md)).
+> **Version 0.4: the tower.** The agent chats, takes off, flies where it's told, flies formation on you, and lands
+> on KSC's runway on published approaches that a tower clears it for; a model on your own PC can be the pilot (the
+> Wingman console, below). Next: taking over a craft you hand it, missions you approve, rescues
+> ([research notes](docs/RESEARCH.md)).
 
 ![The agent's plane (front) flying formation on another player's, over the sea east of KSC](docs/formation.png)
 
@@ -75,9 +76,25 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 | `take_off` | Takes a plane off the runway: rolls straight along the runway on the nose wheel, lifts off at takeoff speed, gear up, climbs out, then turns to the heading and flies on at the altitude and speed given. |
 | `fly` | Flies the plane at a heading, altitude and speed, and keeps it there. Turns by banking, at most 30°. |
 | `follow` | Formation on another player: a slot to their right, behind, above (default 40 m right, 50 m behind), never closer than 30 m. From further than 2 km it flies straight at them first (even head-on), and closes no faster than it can slow down again. |
-| `land` | Lands on KSC's runway (landing east) from anywhere in the air: a circuit out to the final approach 8 km west of KSC, down a 4° glide slope, flare, roll out on the centerline, brakes. Goes around by itself if it isn't lined up, is too high, or the ground comes up too close, and tries again. Takes a few minutes. |
+| `land` | Lands on KSC's runway (landing east) from anywhere in the air. The tower clears a published approach for where the plane is (or give one, or `"visual"` for a plain circuit); the pilot flies its fixes, then the final down a 4° glide slope, flares, rolls out on the centerline and brakes. Goes around by itself if it isn't lined up, is too high, or the ground comes up too close, and the tower clears it again. Takes a few minutes. |
+| `approaches` | The published approaches and their fixes, with the height and speed to cross each at (see [the tower](#the-tower-and-its-approaches)). |
 | `stop_following` | Holds the current heading, height and speed. |
 | `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
+
+### The tower and its approaches
+
+Like a real airport, KSC's runway 09 has published approaches, and `land` asks a tower which one to fly:
+
+| Approach | When | Fixes (height, speed) |
+|---|---|---|
+| `RNAV 09 STRAIGHT-IN` | far out west, already facing the runway | KSC-W12 (900 m, 120 m/s) → F09 |
+| `RNAV 09 NORTH` | north of the runway, or arriving from the north | KSC-N1 (900 m, 110 m/s): downwind 4 km north → KSC-N2 (800 m, 90 m/s) → base → KSC-N3 (750 m, 90 m/s) on the centerline 11 km out → F09 |
+| `RNAV 09 SOUTH` | south of the runway, or arriving from the south | the same, 4 km south: KSC-S1 → KSC-S2 → KSC-S3 → F09 |
+
+F09 is the final approach fix: on the centerline 8 km out, 628 m up, where the 4° glide slope starts. The tower
+answers like ATC: `KSC tower: Wingman, cleared RNAV 09 SOUTH. Proceed to KSC-S1 at 900 m, 110 m/s, then KSC-S2,
+KSC-S3, F09, land KSC runway 09.` (status shows it while landing). The pilot stays on the line between fixes and
+turns early, by the turn's radius, like fly-by waypoints. A plane already lined up on the slope skips the route.
 
 The agent decides what to fly; a pilot in the MCP server flies it, 20 times a second, between the agent's calls (an
 agent thinks in seconds, a plane needs a hand on the stick all the time). Deliberately missing: time warp (it moves the
@@ -147,13 +164,12 @@ instruct on the same PC as both KSPs):
 
 ![The Wingman console: RigPilot says "come back and land at KSC" in LMP chat; the model checks status and calls land](docs/console.png)
 
-![The agent's plane touching down on KSC's runway at dusk, on the centerline](docs/landing.png)
+![The agent's plane flaring, touching down and rolling out on KSC's runway, straight down the centerline](docs/landing.gif)
 
-*`land` in the rig: down the glide slope to the touchdown point, 4 m off the centerline; it stopped 1,161 m down the
-runway.*
+*`land` in the rig (0.4): the tower's RNAV 09 SOUTH, then the flare, touchdown and rollout, 3 m off the centerline.*
 
 **Which model:** a small non-thinking one. On a 16 GB card next to two KSPs, `qwen3:4b-instruct` (3 GB) answers in
-about a second and passed 21 of 21 orders in our eval. In the game it missed one of five: it answered "come back and
+about a second and passed 24 of 24 orders in our eval. In the game it missed one of five: it answered "come back and
 land" with `fly` once, and with `land` when asked again. Thinking models take 20+ s per answer. The console helps
 small models along: it reads tool calls they write out as text, and when one says "Following you!" without calling
 `follow`, it tells it so. To try another model on the same orders, without KSP:
@@ -193,7 +209,8 @@ Version 0.1 was checked with two real KSPs on one LMP server: the agent's chat r
 other player's reply reached the agent. Version 0.2 was flown in the same rig: two agents, each in its own KSP, one
 holding a course and the other taking off and joining it in formation (and, on the way there, crashing a few planes
 into the sea; the fixes are in the changelog). Version 0.3 too: `land` from anywhere in the air, and a local 4B model
-taking orders from the other player's chat, launching, taking off and landing.
+taking orders from the other player's chat, launching, taking off and landing. Version 0.4: four landings on the
+tower's approaches, each lined up the first time; the rollout was tuned from the recordings.
 
 ## License
 

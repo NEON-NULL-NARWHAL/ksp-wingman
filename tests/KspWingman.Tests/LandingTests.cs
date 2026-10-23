@@ -20,7 +20,7 @@ public sealed class LandingTests
         // 20 km east of the runway, flying east: it turns back west, toward the start of the final 8 km out to sea.
         var step = new Landing(Runway.Ksc).Step(Kerbin, AtRunway(20_000, 0, 1500), heading: 90, speed: 150, heightAboveGround: 1430, onGround: false);
         Assert.Equal(LandingPhase.ToFinal, step.Phase);
-        Assert.InRange(step.Target!.Value.Heading, 260, 280);
+        Assert.InRange(step.Target!.Value.Heading, 250, 280); // west, to the south downwind (the tower's pick)
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public sealed class LandingTests
     public void Flares_near_the_ground_and_goes_around_when_off_the_centerline()
     {
         var landing = new Landing(Runway.Ksc);
-        landing.Step(Kerbin, AtRunway(0, 0, 100), 90, 80, 30, false); // on final, on the slope
-        var flare = landing.Step(Kerbin, AtRunway(350, 0, 78), 90, 75, 9, false);
+        landing.Step(Kerbin, AtRunway(-100, 0, 100), 90, 80, 30, false); // on final, on the slope
+        var flare = landing.Step(Kerbin, AtRunway(350, 0, 75), 90, 75, 6, false);
         Assert.Equal(LandingPhase.Flare, flare.Phase);
         Assert.Equal(-1, flare.Target!.Value.ClimbRate);
         Assert.Equal(0, flare.Target.Value.Speed); // throttle shut
@@ -62,7 +62,7 @@ public sealed class LandingTests
     public void Flies_a_circuit_instead_of_turning_onto_final_at_the_last_moment()
     {
         // Over the runway, 500 m south (right of the centerline landing east): out west on the south side first...
-        var landing = new Landing(Runway.Ksc);
+        var landing = new Landing(Runway.Ksc, "visual");
         var first = landing.Step(Kerbin, AtRunway(1000, 500, 600), heading: 90, speed: 120, heightAboveGround: 530, onGround: false);
         Assert.Equal(LandingPhase.ToFinal, first.Phase);
         Assert.InRange(first.Target!.Value.Heading, 255, 275); // a little south of west, toward the side point
@@ -75,7 +75,7 @@ public sealed class LandingTests
         // Turned back in and facing the runway, though not at the point: that's the final now, no chasing the point.
         var facing = landing.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 9500, 1800, 600), heading: 70, speed: 120, heightAboveGround: 530, onGround: false);
         Assert.Equal(LandingPhase.Final, facing.Phase);
-        landing = new Landing(Runway.Ksc);
+        landing = new Landing(Runway.Ksc, "visual");
         landing.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 10_000, 2500, 600), heading: 30, speed: 120, heightAboveGround: 530, onGround: false);
 
         // Back inside the line again on the way in: still heading in, not out to the side point again.

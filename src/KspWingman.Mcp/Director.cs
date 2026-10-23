@@ -62,10 +62,15 @@ public sealed class Director(string host, int port) : IDisposable
         }, $"Following {player}: looking for them.");
     }
 
-    /// <summary>Lands on a runway (from anywhere in the air), rolls out and stops with the brakes on.</summary>
-    public void Land(Runway runway)
+    /// <summary>
+    /// Lands on a runway (from anywhere in the air), rolls out and stops with the brakes on. <paramref name="approach"/>:
+    /// null for the tower's pick, "visual", or an approach's name. The tower's clearance shows up in Clearance.
+    /// </summary>
+    public void Land(Runway runway, string? approach = null)
     {
-        var landing = new Landing(runway);
+        var landing = new Landing(runway, approach);
+        _clearance = null;
+        string? said = null;
         Start(link =>
         {
             var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
@@ -76,9 +81,21 @@ public sealed class Director(string host, int port) : IDisposable
             if (step.Phase is LandingPhase.Final or LandingPhase.Flare)
                 link.Run(_ => { if (!vessel.Control.Gear) vessel.Control.Gear = true; return 0; });
             _doing = step.Doing;
+            if (landing.Approach is { } flying && flying.Name != said)
+            {
+                said = flying.Name;
+                _clearance = Tower.Clearance(link.Wingman<string>("PlayerName"), flying);
+            }
             return step.Target;
         }, $"Landing on {runway.Name}: working out the approach.", landing);
     }
+
+    private (DateTime Time, double Heading)? _rolloutLast;
+
+    /// <summary>The tower's last clearance for the current landing (null: none yet, or a visual approach).</summary>
+    public string? Clearance => _clearance;
+
+    private volatile string? _clearance;
 
     public void Stop()
     {
@@ -182,18 +199,23 @@ public sealed class Director(string host, int port) : IDisposable
         var speed = link.Run(_ => g.Speed);
         var step = landing.Step(radius, me, link.Run(_ => f.Heading), speed, 0, onGround: true);
         var headingError = Pilot.Wrap(landing.Runway.Heading - link.Run(_ => f.Heading));
-        // Back onto the centerline gently: a few degrees of heading for every 10 m off, like take_off's steering.
-        var steer = Math.Clamp(-(headingError + Math.Clamp(-step.Cross / 10, -5, 5)) / 10, -0.5, 0.5);
+        // Wheel steering uses KSP's sign (positive steers left), the opposite of the rudder's.
+        var heading = link.Run(_ => f.Heading);
+        var now = DateTime.UtcNow;
+        var yawRate = _rolloutLast is { } last && (now - last.Time).TotalSeconds > 0.01
+            ? Pilot.Wrap(heading - last.Heading) / (now - last.Time).TotalSeconds : 0;
+        _rolloutLast = (now, heading);
+        var (steer, rudder, brakes) = Landing.Rollout(speed, headingError, step.Cross, yawRate);
         var roll = link.Run(_ => f.Roll);
         link.Run(_ =>
         {
             var c = vessel.Control;
             c.Throttle = 0;
             c.Pitch = 0;
-            c.Yaw = 0;
+            c.Yaw = (float)rudder;
             c.Roll = (float)Math.Clamp(-0.01 * roll, -0.2, 0.2);
             c.WheelSteering = (float)steer;
-            c.Brakes = speed < 70; // full brakes at touchdown speed can tip the nose over
+            c.Brakes = brakes;
             return 0;
         });
         _doing = step.Doing;
@@ -202,7 +224,7 @@ public sealed class Director(string host, int port) : IDisposable
         link.Run(_ => { vessel.Control.Brakes = true; vessel.Control.WheelSteering = 0; return 0; });
         _doing = string.Create(CultureInfo.InvariantCulture,
             $"Landed on {landing.Runway.Name} and stopped, brakes on: {step.Along + Landing.TouchdownAfterThreshold:0} m down the runway, " +
-            $"{Math.Abs(step.Cross):0} m off the centerline. recover or take_off from here.");
+            $"{Math.Abs(step.Cross):0} m off the centerline, pointing {Math.Abs(headingError):0}° off the runway heading. recover or take_off from here.");
         return true;
     }
 

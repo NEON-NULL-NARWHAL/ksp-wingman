@@ -102,10 +102,13 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
     });
 
     [McpServerTool(Name = "land"), Description(
-        "Lands the agent's plane (in the air) on a runway: flies to the final approach 8 km out, down a 4° glide slope, " +
-        "flares, rolls out and stops with the brakes on. Goes around by itself if it isn't lined up. Takes a few minutes; " +
-        "status shows how it's going. Runways: \"KSC\" (the Space Center's, landing east).")]
-    public string Land([Description("Which runway: \"KSC\".")] string runway = "KSC") => krpc.Run(connection =>
+        "Lands the agent's plane (in the air) on a runway. The tower picks a published approach for where the plane is " +
+        "(or give one from approaches), the pilot flies its fixes, then the final down a 4° glide slope, flares, rolls " +
+        "out and stops with the brakes on. Goes around by itself if it isn't lined up, and the tower clears it again. " +
+        "Takes a few minutes; status shows how it's going. Runways: \"KSC\" (the Space Center's, landing east).")]
+    public string Land(
+        [Description("Which runway: \"KSC\".")] string runway = "KSC",
+        [Description("An approach's name from approaches (\"RNAV 09 NORTH\" or just \"NORTH\"), \"visual\" for a plain circuit, or leave out for the tower's pick.")] string? approach = null) => krpc.Run(connection =>
     {
         var vessel = InFlight(connection, out var problem);
         if (vessel == null)
@@ -114,9 +117,27 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
             return "Already on the ground (or in the sea): land is for a plane in the air.";
         if (Runway.Find(runway) is not { } found)
             return $"No runway called \"{runway}\". Known: KSC.";
-        director.Land(found);
-        return director.Doing;
+        if (approach is { Length: > 0 } a && !a.Trim().Equals("visual", StringComparison.OrdinalIgnoreCase) && Approach.Find(a) == null)
+            return $"No approach called \"{a}\". Approaches: {string.Join(", ", Approach.Ksc.Select(x => x.Name))}, or visual.";
+        // The tower's pick now, from where the plane is, so the answer can carry the clearance.
+        if (approach is not { Length: > 0 })
+        {
+            var g = vessel.Flight(vessel.Orbit.Body.ReferenceFrame);
+            var (along, cross) = new Landing(found).RunwayFrame(vessel.Orbit.Body.EquatorialRadius, new Geo(g.Latitude, g.Longitude, g.MeanAltitude));
+            approach = Tower.Pick(Approach.Ksc, along, cross, vessel.Flight(vessel.SurfaceReferenceFrame).Heading, found.Heading).Name;
+        }
+        director.Land(found, approach);
+        var picked = Approach.Find(approach);
+        return picked == null
+            ? "Visual approach: flying a circuit to the final approach. " + director.Doing
+            : Tower.Clearance(krpc.Wingman<string>("PlayerName"), picked);
     });
+
+    [McpServerTool(Name = "approaches"), Description(
+        "The published approaches to a runway: their fixes with the heights and speeds to cross them at, and when to fly " +
+        "each. land picks one by itself; give one to land to choose.")]
+    public string Approaches([Description("Which airport: \"KSC\".")] string airport = "KSC") =>
+        string.Join("\n", Approach.Ksc.Select(a => a.Describe())) + "\nOr \"visual\": a plain circuit to the final approach.";
 
     [McpServerTool(Name = "stop_following"), Description("Stops formation flying and holds the current heading, height and speed.")]
     public string StopFollowing() => krpc.Run(connection =>

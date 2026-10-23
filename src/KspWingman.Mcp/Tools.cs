@@ -42,6 +42,8 @@ public sealed class Tools(KrpcLink krpc, Director director)
             }
         }
         text.AppendLine("Pilot: " + director.Doing);
+        if (director.Active && director.Clearance is { } clearance)
+            text.AppendLine("Tower: " + clearance);
         var behind = krpc.Wingman<double>("SecondsBehind");
         if (behind > 1)
             text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Time: {behind:0} s behind the player furthest ahead (other players may not see you)."));

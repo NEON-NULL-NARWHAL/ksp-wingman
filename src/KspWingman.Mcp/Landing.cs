@@ -19,19 +19,48 @@ public enum LandingPhase { ToFinal, Final, Flare, Rollout, GoAround }
 /// <summary>One step's answer: the phase, what to fly (null on the ground) and where the plane is from the touchdown point.</summary>
 public readonly record struct LandingStep(LandingPhase Phase, PlaneTarget? Target, double Along, double Cross, string Doing);
 
-public sealed class Landing(Runway runway)
+/// <summary>
+/// Lands on <paramref name="runway"/>. <paramref name="approach"/>: null for the tower's pick of the published approaches
+/// (the default), "visual" for the old hand-made circuit, or an approach's name.
+/// </summary>
+public sealed class Landing(Runway runway, string? approach = null)
 {
     public const double GlideSlope = 4; // degrees
     public const double FinalDistance = 8000; // m before touchdown where the final approach starts
-    public const double TouchdownAfterThreshold = 400; // m
+    public const double TouchdownAfterThreshold = 300; // m (400 plus the flare's float stopped the third 0.4 landing 77 m before the end)
     public const double ApproachSpeed = 90, LandingSpeed = 75; // m/s
-    public const double FlareHeight = 12; // m above the ground
+    public const double FlareHeight = 8; // m above the ground (12 floated for 600 m)
 
     private LandingPhase _phase = LandingPhase.ToFinal;
     private bool _outside;
+    private Route? _route;
+    private readonly bool _visual = approach?.Trim().Equals("visual", StringComparison.OrdinalIgnoreCase) == true;
+    private readonly Approach? _asked = approach is { Length: > 0 } a && !a.Trim().Equals("visual", StringComparison.OrdinalIgnoreCase) ? Approach.Find(a) : null;
 
     public Runway Runway => runway;
     public LandingPhase Phase => _phase;
+
+    /// <summary>The approach being flown (null: visual), once the first step has picked it.</summary>
+    public Approach? Approach => _route?.Approach;
+
+    /// <summary>
+    /// What the steering, rudder and brakes should be on the runway: steering eases off as the plane slows (at walking
+    /// speed it swung both 0.3 landings 15-50 degrees off the runway heading). (Brakes only within 4 degrees kept them off
+    /// so long that the first 0.4 landing rolled 475 m off the end of the runway.)
+    /// The second 0.4 landing ground-looped: at 57 m/s the nose wheel swung it 111° → 63° → 197°. So the steering also
+    /// fades at high speed (a nose wheel bites hard at 50 m/s), every axis is damped by the yaw rate (degrees a second,
+    /// positive turning right), the rudder helps while it's fast, and the brakes wait for a steady nose below 50 m/s.
+    /// </summary>
+    public static (double Steer, double Rudder, bool Brakes) Rollout(double speed, double headingError, double cross, double yawRate = 0)
+    {
+        var aim = headingError + Math.Clamp(-cross / 10, -5, 5); // degrees to turn (positive: right)
+        var fade = Math.Clamp((speed - 5) / 15, 0, 1) * Math.Clamp(20 / Math.Max(speed, 1), 0.15, 1);
+        var steer = Math.Clamp((-aim / 10 + 0.08 * yawRate) * fade, -0.3, 0.3);
+        // The wheel's sign is KSP's (positive steers left); the rudder's is the pilot's (positive yaws right).
+        var rudder = speed > 25 ? Math.Clamp(0.03 * aim - 0.02 * yawRate, -0.3, 0.3) : 0;
+        var brakes = speed < 8 || (speed < 60 && Math.Abs(headingError) < 8 && Math.Abs(yawRate) < 5);
+        return (steer, rudder, brakes);
+    }
 
     /// <summary>
     /// One step. <paramref name="heightAboveGround"/> from the radar altimeter; <paramref name="onGround"/> once the wheels
@@ -49,7 +78,35 @@ public sealed class Landing(Runway runway)
             return new LandingStep(_phase, null, along, cross, Describe("rolling out", along, cross, speed));
         }
 
-        if (_phase is LandingPhase.ToFinal or LandingPhase.GoAround)
+        if (!_visual && _phase is LandingPhase.ToFinal or LandingPhase.GoAround)
+        {
+            // A published approach: the tower's pick (again after a go-around, from wherever the plane is), or the one asked.
+            if (_phase == LandingPhase.GoAround && heightAboveGround < 300)
+            {
+                var climbOut = new PlaneTarget(runway.Heading, touchdownAltitude + 900, 120, ClimbRate: 8, Landing: true);
+                return new LandingStep(_phase, climbOut, along, cross, "Going around: climbing out straight ahead.");
+            }
+            // Already lined up on the slope: the final now, no route (like the visual circuit).
+            var linedUp = Math.Abs(Pilot.Wrap(heading - runway.Heading)) < 30 && Math.Abs(cross) < 600 && along < -300 &&
+                along > -FinalDistance - 3000 && Math.Abs(plane.Altitude - (touchdownAltitude + Math.Max(0, -along) * tan)) < 150;
+            if (!linedUp && (_route == null || _phase == LandingPhase.GoAround))
+            {
+                _route = new Route(_asked ?? Tower.Pick(Approach.Ksc, along, cross, heading, runway.Heading));
+                _phase = LandingPhase.ToFinal;
+            }
+            if (!linedUp && _route!.Step(along, cross, speed) is { } leg)
+            {
+                var next = _route.Next;
+                var (nN, nE) = Point(next.Along, next.Cross);
+                var (mN, mE) = Point(along, cross);
+                var distance = Math.Sqrt(Math.Pow(nN - mN, 2) + Math.Pow(nE - mE, 2));
+                return new LandingStep(_phase, leg, along, cross, string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                    $"Flying {_route.Approach.Name}: to {next.Name}, {distance / 1000:0.0} km, at {next.Altitude:0} m and {next.Speed:0} m/s."));
+            }
+            _phase = LandingPhase.Final;
+        }
+
+        if (_visual && _phase is LandingPhase.ToFinal or LandingPhase.GoAround)
         {
             // Climb out (go-around) or head for the start of the final approach.
             var fixAltitude = touchdownAltitude + FinalDistance * tan;
@@ -117,7 +174,9 @@ public sealed class Landing(Runway runway)
         _phase = LandingPhase.Final;
         var sink = -speed * tan + Math.Clamp(0.15 * (glideAltitude - altitude), -6, 6);
         var approachSpeed = along < -3000 ? ApproachSpeed : LandingSpeed;
-        var final = new PlaneTarget(course, glideAltitude, approachSpeed, ClimbRate: Math.Clamp(sink, -15, 4), Landing: true);
+        // 30 degrees of bank far out (20 turned onto final too wide in the rig), 20 near the ground.
+        var bank = along < -3000 && heightAboveGround > 300 ? 30 : 20;
+        var final = new PlaneTarget(course, glideAltitude, approachSpeed, ClimbRate: Math.Clamp(sink, -15, 4), Landing: true, MaxBank: bank);
         return new LandingStep(_phase, final, along, cross, Describe("on final", along, cross, speed));
     }
 

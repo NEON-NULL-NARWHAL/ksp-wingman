@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.0 (2026-10-23): the tower
+
+### Added
+- **Published approaches and a tower** (the owner's idea): KSC runway 09 has three RNAV approaches (straight-in, north
+  and south traffic patterns: downwind, base, the extended centerline, the final fix). `land` asks the tower, which
+  picks one for where the plane is and gives a clearance ("KSC tower: Wingman, cleared RNAV 09 NORTH. Proceed to
+  KSC-N1 at 900 m, 110 m/s, then KSC-N2, KSC-N3, F09"); status shows it. `land(approach)` picks one yourself, or
+  `"visual"` for the old circuit. A new tool, `approaches`, lists them.
+- The route follower flies the fixes: it stays on the line between them, turns early by the turn's radius (fly-by
+  waypoints), and meets each fix's height and speed. After a go-around the tower clears a new approach from wherever
+  the plane is.
+
+### Changed
+- Rollout: the nose wheel's steering fades at high speed and at walking speed, every axis is damped by the yaw rate,
+  the rudder helps while it's fast, and the brakes wait for a steady nose below 60 m/s.
+- Final: up to 30° of bank far out (20° made the turn onto final too wide), 20° near the ground; touchdown aimed 300 m
+  past the threshold (was 400) and the flare starts at 8 m (was 12, which floated for 600 m).
+- The landed message says which way the plane points when it stops.
+
+### Found in the rig (four tower landings, with RigRun and RigWatch)
+- Every tower approach lined up the first time (on final 9 km out about 240 m off the centerline, 3 m off at the flare).
+- Rollout, in order: brakes only within 4° of the runway heading ran the plane 475 m off the end; brakes from 65 m/s
+  without damping ground-looped it (111° → 63° → 197° at 57 m/s, seen in the recording); with damping it stopped
+  straight but 77 m from the end; with the earlier touchdown: 1,153 m down the runway, 11 m off the centerline,
+  3° off the heading.
+- The eval has a new order ("land at KSC using the north approach"): Qwen3 4B instruct 24/24.
+
 ## 0.3.0 (2026-10-23): local models
 
 ### Added

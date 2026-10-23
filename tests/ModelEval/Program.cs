@@ -34,6 +34,10 @@ var scenarios = new (string Name, string State, string From, string Order, Func<
             : Near(double.IsNaN(Num(t, "heading")) ? 90 : Num(t, "heading"), 90, 5) && Near(Num(t, "altitude"), 1000, 100) ? null : $"take_off({t.RawArguments}) and no fly"),
     ("land", Flying, "Ann", "come back and land at KSC", (calls, _) =>
         calls.Any(c => c.Name == "land") ? null : "no land"),
+    ("land north approach", Flying, "Ann", "land at KSC using the north approach", (calls, _) =>
+        calls.LastOrDefault(c => c.Name == "land") is { } l
+            ? (l.Arguments.TryGetValue("approach", out var a) && a is string s && s.Contains("NORTH", StringComparison.OrdinalIgnoreCase) ? null : $"land({l.RawArguments})")
+            : "no land"),
     ("follow me", Flying, "Ann", "follow me", (calls, _) =>
         calls.LastOrDefault(c => c.Name == "follow") is { } f ? (f.Arguments.TryGetValue("player", out var p) && "Ann".Equals(p as string, StringComparison.OrdinalIgnoreCase) ? null : $"follow({f.RawArguments})") : "no follow"),
     ("climb north", Flying, "Bob", "turn north and climb to 3000 m", (calls, _) =>
@@ -95,7 +99,9 @@ internal sealed class ScriptedTools(IReadOnlyList<ToolSpec> tools, string state)
                 $"{(arguments.TryGetValue("altitude", out var a) && a != null ? a : 570)} m, 150 m/s. Use fly, follow or land to change that.",
             "fly" => "Holding the new heading, altitude and speed.",
             "follow" => "Following them: looking for them.",
-            "land" => "Landing on KSC runway 09: working out the approach.",
+            "land" => "KSC tower: Wingman, cleared RNAV 09 NORTH. Proceed to KSC-N1 at 900 m, 110 m/s, then KSC-N2, KSC-N3, F09, land KSC runway 09.",
+            "approaches" => "RNAV 09 STRAIGHT-IN (from the west): KSC-W12 900 m 120 m/s → F09 628 m 90 m/s → land KSC runway 09.\n" +
+                "RNAV 09 NORTH (from the north): KSC-N1 → KSC-N2 → KSC-N3 → F09.\nRNAV 09 SOUTH (from the south): KSC-S1 → KSC-S2 → KSC-S3 → F09.",
             "stop_flying" => "Not flying it any more: throttle zero, SAS on.",
             _ => "Done.",
         });

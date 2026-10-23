@@ -9,9 +9,10 @@ public readonly record struct PlaneState(double Pitch, double Roll, double Headi
 
 /// <summary>
 /// What it asks for: heading (degrees), altitude (m above sea level), speed (m/s). A climb rate (m/s) replaces the
-/// altitude when given (a glide slope, a flare). Landing turns off the "too low, pull up" rule and banks at most 20°.
+/// altitude when given (a glide slope, a flare). Landing turns off the "too low, pull up" rule and banks at most 20°
+/// (or <paramref name="MaxBank"/>, when given).
 /// </summary>
-public readonly record struct PlaneTarget(double Heading, double Altitude, double Speed, double? ClimbRate = null, bool Landing = false);
+public readonly record struct PlaneTarget(double Heading, double Altitude, double Speed, double? ClimbRate = null, bool Landing = false, double MaxBank = 0);
 
 /// <summary>Control inputs, kRPC's ranges: pitch and roll -1..1 (positive is nose up and roll right), throttle 0..1.</summary>
 public readonly record struct PlaneInputs(float Pitch, float Roll, float Yaw, float Throttle);
@@ -60,7 +61,7 @@ public sealed class Pilot
         var elevator = authority * (0.012 * pitchError - 0.006 * pitchRate) + _pitchTrim;
 
         // Heading → bank → ailerons.
-        var maxBank = t.Landing ? 20 : MaxBank;
+        var maxBank = t.MaxBank > 0 ? Math.Min(t.MaxBank, MaxBank) : t.Landing ? 20 : MaxBank;
         var bankTarget = tooLow ? 0 : Math.Clamp(1.2 * Wrap(t.Heading - s.Heading), -maxBank, maxBank);
         var aileron = authority * (0.006 * Wrap(bankTarget - s.Roll) - 0.003 * rollRate);
 
