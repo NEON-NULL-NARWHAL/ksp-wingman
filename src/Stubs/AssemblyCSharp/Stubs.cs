@@ -54,6 +54,12 @@ public class Vessel : UnityEngine.MonoBehaviour
 
     public string vesselName;
 
+    public double latitude;
+
+    public double longitude;
+
+    public double altitude;
+
     public string GetDisplayName() => throw new System.NotSupportedException();
 }
 
@@ -64,6 +70,8 @@ public class FlightGlobals : UnityEngine.MonoBehaviour
     public static Vessel ActiveVessel => throw new System.NotSupportedException();
 
     public static System.Collections.Generic.List<Vessel> VesselsLoaded => throw new System.NotSupportedException();
+
+    public static System.Collections.Generic.List<Vessel> Vessels => throw new System.NotSupportedException();
 
     public static bool SetActiveVessel(Vessel v) => throw new System.NotSupportedException();
 }

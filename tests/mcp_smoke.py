@@ -7,7 +7,7 @@ import json, os, subprocess, sys
 
 exe, port, calls = sys.argv[1], sys.argv[2], sys.argv[3:]
 env = dict(os.environ, WINGMAN_KRPC_PORT=port)
-proc = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, text=True, encoding="utf-8")
+proc = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(os.environ.get('WINGMAN_SMOKE_STDERR', os.devnull), 'w'), env=env, text=True, encoding="utf-8")
 next_id = 0
 
 def request(method, params=None):
@@ -31,6 +31,10 @@ tools = request("tools/list")["result"]["tools"]
 print("tools:", ", ".join(t["name"] for t in tools))
 for call in calls:
     name, _, args = call.partition(":")
+    if name == "sleep":  # keep the server (and its flight loop) running for a while
+        import time
+        time.sleep(float(args))
+        continue
     result = request("tools/call", {"name": name, "arguments": json.loads(args) if args else {}})
     if "error" in result:
         print(f"== {name}: protocol error {result['error']}")

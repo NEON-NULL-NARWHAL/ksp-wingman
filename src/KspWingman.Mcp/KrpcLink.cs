@@ -83,5 +83,5 @@ public sealed class KrpcLink(string host, int port) : IDisposable
     public void Dispose() => Reset();
 }
 
-/// <summary>A problem the agent should read as is (shown as the tool's error).</summary>
-public sealed class WingmanException(string message) : Exception(message);
+/// <summary>A problem the agent should read as is: an McpException, so the SDK passes the message on (others become "An error occurred").</summary>
+public sealed class WingmanException(string message) : ModelContextProtocol.McpException(message);

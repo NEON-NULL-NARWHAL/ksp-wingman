@@ -15,7 +15,7 @@ namespace KspWingman.Mcp;
 /// universe). Agents think in seconds, so these are autopilot-level, not stick and rudder.
 /// </summary>
 [McpServerToolType]
-public sealed class FlightTools(KrpcLink krpc)
+public sealed class FlightTools(KrpcLink krpc, Director director)
 {
     [McpServerTool(Name = "launchable_craft"), Description(
         "The craft the agent's KSP can launch: from the VAB (rockets, launch pad) and the SPH (planes and rovers, runway).")]
@@ -33,8 +33,17 @@ public sealed class FlightTools(KrpcLink krpc)
         [Description("\"Runway\" (from the SPH) or \"LaunchPad\" (from the VAB).")] string site = "Runway") => krpc.Run(connection =>
     {
         var scene = connection.KRPC().GameScene;
-        if (scene != GameScene.SpaceCenter)
-            return $"Not launched: launching works from the Space Center, and the game is in {scene}.";
+        if (scene == GameScene.Flight)
+        {
+            // From flight only when the current vessel is done (on the ground, in the sea, or wrecked); never mid-flight.
+            director.Stop();
+            var current = connection.SpaceCenter().ActiveVessel;
+            if (!Wrecked(current) && current.Situation is not (VesselSituation.Landed or VesselSituation.Splashed or VesselSituation.PreLaunch) &&
+                current.Flight(current.Orbit.Body.ReferenceFrame).SurfaceAltitude > 5)
+                return "Not launched: the agent's vessel is still flying. Land it (or stop_flying) first.";
+        }
+        else if (scene != GameScene.SpaceCenter)
+            return $"Not launched: launching works from the Space Center or after a flight, and the game is in {scene}.";
         var directory = site.Equals("LaunchPad", StringComparison.OrdinalIgnoreCase) ? "VAB" : "SPH";
         var space = connection.SpaceCenter();
         if (!space.LaunchableVessels(directory).Contains(craft))
@@ -45,12 +54,13 @@ public sealed class FlightTools(KrpcLink krpc)
     });
 
     [McpServerTool(Name = "fly"), Description(
-        "Flies the agent's vessel on kRPC's autopilot: point it at a compass heading and pitch, and set the throttle. Holds " +
-        "that until told otherwise. Heading 90 is east (along the runway); pitch 0 is level, 90 straight up.")]
+        "Flies the agent's plane (in the air) at a compass heading, altitude and speed, and keeps flying it there until told " +
+        "otherwise; it turns by banking, at most 30°. Heading 90 is east (along the runway). Altitude is above sea level " +
+        "(KSC is about 70 m up). A stock jet flies well at 120-200 m/s.")]
     public string Fly(
         [Description("Compass heading in degrees (0 north, 90 east).")] double heading,
-        [Description("Pitch in degrees above the horizon (-90 to 90).")] double pitch,
-        [Description("Throttle, 0 to 1.")] double throttle) => krpc.Run(connection =>
+        [Description("Altitude in metres above sea level.")] double altitude,
+        [Description("Speed in m/s.")] double speed = 150) => krpc.Run(connection =>
     {
         var vessel = InFlight(connection, out var problem);
         if (vessel == null)
@@ -59,10 +69,44 @@ public sealed class FlightTools(KrpcLink krpc)
         // test flight turned 80° off the runway into the hangar. take_off rolls straight on the nose wheel instead.
         if (vessel.Situation is VesselSituation.PreLaunch or VesselSituation.Landed && vessel.Flight(vessel.Orbit.Body.ReferenceFrame).Speed < 40)
             return "Not from the ground: for a plane on the runway, use take_off (fly is for the air).";
-        vessel.Control.Throttle = (float)Math.Clamp(throttle, 0, 1);
-        vessel.AutoPilot.TargetPitchAndHeading((float)Math.Clamp(pitch, -90, 90), (float)((heading % 360 + 360) % 360));
-        vessel.AutoPilot.Engaged = true;
-        return string.Create(CultureInfo.InvariantCulture, $"Flying heading {heading:0}°, pitch {pitch:0}°, throttle {throttle:0.00}.");
+        var ground = vessel.Flight(vessel.Orbit.Body.ReferenceFrame);
+        if (altitude - (ground.MeanAltitude - ground.SurfaceAltitude) < 100)
+            return "Not that low: at least 100 m above the ground there (status shows the height above ground).";
+        director.Hold(new PlaneTarget((heading % 360 + 360) % 360, altitude, Math.Clamp(speed, 60, 400)));
+        return director.Doing;
+    });
+
+    [McpServerTool(Name = "follow"), Description(
+        "Flies formation on another player (in the air): keeps the agent's plane in a slot beside them, matching their " +
+        "heading, height and speed, and never closer than 30 m. Keeps going until fly, stop_following or stop_flying. " +
+        "status says how close to the slot it is.")]
+    public string Follow(
+        [Description("The player's name, as players lists it.")] string player,
+        [Description("Metres to their right (negative: to their left).")] double right = 40,
+        [Description("Metres behind them.")] double behind = 50,
+        [Description("Metres above them (negative: below).")] double up = 0) => krpc.Run(connection =>
+    {
+        var vessel = InFlight(connection, out var problem);
+        if (vessel == null)
+            return problem!;
+        if (vessel.Situation is VesselSituation.PreLaunch or VesselSituation.Landed)
+            return "Not from the ground: take_off first.";
+        if (krpc.Wingman<IList<double>>("PlayerPosition", player).Count < 3)
+            return $"{player} has no vessel in this game right now (players shows who's flying what).";
+        director.Follow(player, new Slot(right, behind, up));
+        return director.Doing;
+    });
+
+    [McpServerTool(Name = "stop_following"), Description("Stops formation flying and holds the current heading, height and speed.")]
+    public string StopFollowing() => krpc.Run(connection =>
+    {
+        var vessel = InFlight(connection, out var problem);
+        if (vessel == null)
+            return problem!;
+        var f = vessel.Flight(vessel.SurfaceReferenceFrame);
+        var g = vessel.Flight(vessel.Orbit.Body.ReferenceFrame);
+        director.Hold(new PlaneTarget(f.Heading, g.MeanAltitude, Math.Max(60, g.Speed)));
+        return director.Doing;
     });
 
     [McpServerTool(Name = "stage"), Description("Fires the next stage (engines, decouplers, parachutes, whatever the craft has next).")]
@@ -95,9 +139,11 @@ public sealed class FlightTools(KrpcLink krpc)
         var vessel = InFlight(connection, out var problem);
         if (vessel == null)
             return problem!;
+        director.Stop();
         vessel.AutoPilot.Engaged = false;
         vessel.Control.Throttle = 0;
-        return "Autopilot off, throttle zero.";
+        vessel.Control.SAS = true;
+        return "Not flying it any more: throttle zero, SAS on.";
     });
 
     [McpServerTool(Name = "recover"), Description(
@@ -164,6 +210,9 @@ public sealed class FlightTools(KrpcLink krpc)
             else if (height > 100)
             {
                 krpc.Run(_ => control.Gear = false);
+                // From here our own pilot flies: climb out to 500 m above the ground on the same heading.
+                var sea = krpc.Run(_ => vessel.Flight(ground).MeanAltitude - height);
+                director.Hold(new PlaneTarget(heading, sea + 500, 150));
                 return Airborne(height, speed, climbPitch, heading);
             }
             await Task.Delay(100, cancel);
@@ -173,7 +222,7 @@ public sealed class FlightTools(KrpcLink krpc)
     }
 
     private static string Airborne(double height, double speed, double pitch, double heading) => string.Create(CultureInfo.InvariantCulture,
-        $"Airborne: {height:0} m above the ground at {speed:0} m/s, climbing at {pitch:0}° on heading {heading:0}°. Gear up. The autopilot holds this until fly or stop_flying.");
+        $"Airborne: {height:0} m above the ground at {speed:0} m/s on heading {heading:0}°, gear up. Climbing out to 500 m above the ground at 150 m/s; then fly or follow.");
 
     private static string NotAirborne(double speed, double height, bool rotated) => string.Create(CultureInfo.InvariantCulture,
         $"Didn't get airborne in 90 s: {speed:0} m/s, {height:0} m above the ground ({(rotated ? "nose lifted, but no climb" : "never reached rotate speed")}). Try stop_flying, then recover.");
@@ -189,7 +238,14 @@ public sealed class FlightTools(KrpcLink krpc)
             problem = $"Not flying: the game is in {scene}. Launch something first.";
             return null;
         }
-        problem = null;
-        return connection.SpaceCenter().ActiveVessel;
+        var vessel = connection.SpaceCenter().ActiveVessel;
+        problem = Wrecked(vessel) ? "Not flying: the agent's vessel was destroyed (it crashed). Launch a new one." : null;
+        return problem == null ? vessel : null;
     }
+
+    /// <summary>
+    /// A crashed vessel stays the active one until the next launch, frozen and still "Flying" in kRPC's eyes, with no
+    /// parts left (seen in the rig: a sunk plane at 2 m, 265 m/s, nose down, for minutes).
+    /// </summary>
+    public static bool Wrecked(Vessel vessel) => vessel.Parts.All.Count == 0;
 }

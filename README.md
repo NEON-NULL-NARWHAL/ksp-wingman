@@ -10,8 +10,13 @@ locks, so it can only ever fly its own craft. It talks with you in LMP's chat.
 A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control).
 
 > [!NOTE]
-> **Version 0.1: the chat companion.** The agent joins, sees who's online and what they're flying, and chats in LMP's
-> chat. **Flying is next** (0.2: take off and fly formation on you; then rescues, tankers, docking help).
+> **Version 0.2: the wingman.** The agent chats in LMP's chat, takes a plane off the runway, flies where it's told,
+> and flies formation on you. Next: rescues, tankers, docking help.
+
+![The agent's plane (front) flying formation on another player's, over the sea east of KSC](docs/formation.png)
+
+*The agent's KSP, in the test rig: its plane (front right) holding a slot beside the other player's (left), both at
+1,500 m and 120 m/s. The other plane is where LMP shows it.*
 
 ## What you need
 
@@ -50,6 +55,27 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 | `send_chat` | Says one line in LMP's chat, as the agent's player. |
 | `wait_for_chat` | Waits until someone else says something (up to 2 minutes), then returns the new lines. |
 
+**Flying (0.2):**
+
+| Tool | What it does |
+|---|---|
+| `launchable_craft` | The craft the agent's KSP can launch, from the VAB and the SPH. |
+| `launch` | Launches a craft onto the runway (planes, rovers) or the launch pad (rockets). |
+| `take_off` | Takes a plane off the runway: rolls straight on the nose wheel, lifts off at takeoff speed, gear up, climbs out. |
+| `fly` | Flies the plane at a heading, altitude and speed, and keeps it there. Turns by banking, at most 30°. |
+| `follow` | Formation on another player: a slot to their right, behind, above (default 40 m right, 50 m behind), never closer than 30 m. From further than 2 km it flies straight at them first (even head-on), and closes no faster than it can slow down again. |
+| `stop_following` | Holds the current heading, height and speed. |
+| `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
+
+The agent decides what to fly; a pilot in the MCP server flies it, 20 times a second, between the agent's calls (an
+agent thinks in seconds, a plane needs a hand on the stick all the time). Deliberately missing: time warp (it moves the
+agent away from the other players in time) and revert (it rewrites the shared universe).
+
+**Guardrails in the pilot:** at most 30° of bank and a quarter stick; gentler controls at high speed; below 150 m
+above the ground and sinking, it levels the wings and climbs, whatever it was told; never faster than 250 m/s when
+following; it stops (and says so) when the plane lands, splashes down or is destroyed. If the MCP server is closed
+mid-flight, it turns SAS on first.
+
 **Guardrails, built into the bridge:** chat lines are one line, at most 300 characters, at most one a second. The agent
 only ever controls its own KSP; LMP's locks keep it off everyone else's vessels.
 
@@ -72,7 +98,9 @@ names come from LUNA EVO's own stand-ins in `src/Stubs` (no Squad or Unity code)
 
 Written by Claude (Anthropic's AI model), directed and reviewed by the project owner, like LUNA EVO Mission Control.
 Version 0.1 was checked with two real KSPs on one LMP server: the agent's chat reached the other player, and the
-other player's reply reached the agent.
+other player's reply reached the agent. Version 0.2 was flown in the same rig: two agents, each in its own KSP, one
+holding a course and the other taking off and joining it in formation (and, on the way there, crashing a few planes
+into the sea; the fixes are in the changelog).
 
 ## License
 

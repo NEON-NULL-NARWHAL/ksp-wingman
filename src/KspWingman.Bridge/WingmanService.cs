@@ -97,6 +97,22 @@ namespace KspWingman.Bridge
             return others.Count == 0 ? 0 : Math.Max(0, others.Max() - mine);
         }
 
+        /// <summary>
+        /// Where another player's vessel is, as LMP shows it in this game: { latitude, longitude, altitude (m above sea
+        /// level) }, or empty if they have no vessel (or it isn't in this game). Their vessel is the one they hold LMP's
+        /// control lock for.
+        /// </summary>
+        [KRPCProcedure]
+        public static IList<double> PlayerPosition(string player)
+        {
+            if (!InGame() || string.IsNullOrEmpty(player))
+                return new List<double>();
+            foreach (var vessel in FlightGlobals.Vessels)
+                if (vessel != null && LmpClient.Systems.Lock.LockSystem.LockQuery.GetControlLockOwner(vessel.id) == player)
+                    return new List<double> { vessel.latitude, vessel.longitude, vessel.altitude };
+            return new List<double>();
+        }
+
         /// <summary>A stock name as KSP shows it: "#autoLOC_501174" → "Aeris 3A" (other text is returned as is).</summary>
         [KRPCProcedure]
         public static string Localize(string text) =>

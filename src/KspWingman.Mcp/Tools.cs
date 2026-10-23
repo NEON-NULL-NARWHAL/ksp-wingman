@@ -11,7 +11,7 @@ using ModelContextProtocol.Server;
 namespace KspWingman.Mcp;
 
 [McpServerToolType]
-public sealed class Tools(KrpcLink krpc)
+public sealed class Tools(KrpcLink krpc, Director director)
 {
     /// <summary>The longest wait_for_chat may wait (an MCP call shouldn't hang for minutes).</summary>
     internal const int MaxWaitSeconds = 120;
@@ -31,11 +31,17 @@ public sealed class Tools(KrpcLink krpc)
             var body = vessel.Orbit.Body;
             var flight = vessel.Flight(body.ReferenceFrame); // speeds relative to the ground
             var attitude = vessel.Flight(vessel.SurfaceReferenceFrame); // heading and pitch against the horizon
-            text.AppendLine($"Vessel: {Name(vessel.Name)} ({vessel.Situation}) at {body.Name}");
-            text.AppendLine(string.Create(CultureInfo.InvariantCulture,
-                $"Altitude {flight.MeanAltitude:0} m (above ground {flight.SurfaceAltitude:0} m) · speed {flight.Speed:0.0} m/s · " +
-                $"heading {attitude.Heading:0}° · pitch {attitude.Pitch:0}° · lat {flight.Latitude:0.0000} lon {flight.Longitude:0.0000}"));
+            if (FlightTools.Wrecked(vessel))
+                text.AppendLine($"Vessel: {Name(vessel.Name)}, destroyed (it crashed). Launch a new one.");
+            else
+            {
+                text.AppendLine($"Vessel: {Name(vessel.Name)} ({vessel.Situation}) at {body.Name}");
+                text.AppendLine(string.Create(CultureInfo.InvariantCulture,
+                    $"Altitude {flight.MeanAltitude:0} m (above ground {flight.SurfaceAltitude:0} m) · speed {flight.Speed:0.0} m/s · " +
+                    $"heading {attitude.Heading:0}° · pitch {attitude.Pitch:0}° · lat {flight.Latitude:0.0000} lon {flight.Longitude:0.0000}"));
+            }
         }
+        text.AppendLine("Pilot: " + director.Doing);
         var behind = krpc.Wingman<double>("SecondsBehind");
         if (behind > 1)
             text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Time: {behind:0} s behind the player furthest ahead (other players may not see you)."));
