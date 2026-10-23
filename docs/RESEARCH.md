@@ -101,3 +101,17 @@ approach and landing in the rig, both KSPs still smooth.
 
 Sources: https://recipes.vllm.ai/Google/gemma-4-E4B-it, https://registry.ollama.ai/library/gemma4,
 https://www.lmstudio.ai/models/google/gemma-4-e4b, https://skills.cat/skills/luckyegg168/gemma-4
+
+### Bigger Gemma variants worth trying (write-ups, not measured here; 16 GB card shared with two KSPs)
+
+- **Gemma 4 26B A4B (MoE)**: only ~3.8B parameters active per token, so it should run near E4B's speed with much
+  more knowledge; ~16-19 GB at 4-bit, so on our 16 GB card only with a short context and probably not beside two KSPs.
+  Best fit: the planner on the owner's cluster, or on this PC with one KSP. The top candidate for "more power, small cost".
+- **Gemma 3 12B (dense)**: ~8 GB at 4-bit, called the sweet spot for 12-16 GB GPUs: a planner here, next to the
+  pilot model and two KSPs if the pilot stays small.
+- **Gemma 4 31B (dense)**: ~18-20 GB at 4-bit, a 24-32 GB card: cluster only.
+- Speed claims for these conflict wildly (11 to 149 tokens/s for the same 26B on the same GPU), so measure with one
+  quant, context and backend: EvalMatrix (seconds per order, valid plans) and a rig head to head against E4B.
+
+Sources: https://ai.google.dev/gemma/docs/core, https://www.yottalabs.ai/post/gemma-4-hardware-requirements-gpu-memory-2026,
+https://modelfit.io/blog/gemma-4-gpu-requirements/, https://runaihome.com/blog/gemma-4-local-ai-gpu-guide-2026/
