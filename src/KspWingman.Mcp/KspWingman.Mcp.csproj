@@ -6,7 +6,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <AssemblyName>KspWingman.Mcp</AssemblyName>
     <RootNamespace>KspWingman.Mcp</RootNamespace>
     <!-- KRPC.Client ships only a .NET Framework build; it works on .NET 10 (LUNA EVO's test rig uses it the same way). -->

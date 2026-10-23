@@ -15,7 +15,7 @@ namespace KspWingman.Mcp;
 /// universe). Agents think in seconds, so these are autopilot-level, not stick and rudder.
 /// </summary>
 [McpServerToolType]
-public sealed class FlightTools(KrpcLink krpc, Director director)
+public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink tower)
 {
     [McpServerTool(Name = "launchable_craft"), Description(
         "The craft the agent's KSP can launch: from the VAB (rockets, launch pad) and the SPH (planes and rovers, runway).")]
@@ -108,7 +108,15 @@ public sealed class FlightTools(KrpcLink krpc, Director director)
         "Takes a few minutes; status shows how it's going. Runways: \"KSC\" (the Space Center's, landing east).")]
     public string Land(
         [Description("Which runway: \"KSC\".")] string runway = "KSC",
-        [Description("An approach's name from approaches (\"RNAV 09 NORTH\" or just \"NORTH\"), \"visual\" for a plain circuit, or leave out for the tower's pick.")] string? approach = null) => krpc.Run(connection =>
+        [Description("An approach's name from approaches (\"RNAV 09 NORTH\" or just \"NORTH\"), \"visual\" for a plain circuit, or leave out for the tower's pick.")] string? approach = null)
+    {
+        // With LUNA EVO's tower (WINGMAN_TOWER_URL), the tower decides: it clears an approach or holds the plane.
+        if (tower.Client is { } client && approach is not { Length: > 0 } && krpc.Run(c => InFlight(c, out _)?.Situation == VesselSituation.Flying))
+            return client.RequestApproachAsync().GetAwaiter().GetResult();
+        return LandOnOwn(runway, approach);
+    }
+
+    private string LandOnOwn(string runway, string? approach) => krpc.Run(connection =>
     {
         var vessel = InFlight(connection, out var problem);
         if (vessel == null)

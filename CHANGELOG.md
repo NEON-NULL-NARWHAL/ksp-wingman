@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0 (2026-10-23): a real tower
+
+### Added
+- **LUNA EVO Mission Control's KSC tower** (2.11): with `WINGMAN_TOWER_URL` (localhost only), the agent reports to it
+  every 3 s, answers "say intentions" from what its pilot is doing, and flies what it's told: a cleared route (the
+  tower sends the fixes), a hold (right-hand circles around a point at an altitude), and vacating the runway after
+  landing (it recovers the plane: an agent can't taxi). `land` asks the tower when there is one; status shows the
+  tower's last message.
+
+### Found in the rig (two KSPs, two agents, one tower)
+- RigPilot was cleared for RNAV 09 SOUTH, RigViewer held as number 2 at KSC-HS for six minutes, RigPilot was cleared
+  to land, landed and vacated, and RigViewer was cleared the same second.
+
 ## 0.4.0 (2026-10-23): the tower
 
 ### Added

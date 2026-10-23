@@ -66,9 +66,28 @@ public sealed class Director(string host, int port) : IDisposable
     /// Lands on a runway (from anywhere in the air), rolls out and stops with the brakes on. <paramref name="approach"/>:
     /// null for the tower's pick, "visual", or an approach's name. The tower's clearance shows up in Clearance.
     /// </summary>
-    public void Land(Runway runway, string? approach = null)
+    public void Land(Runway runway, string? approach = null) => Land(new Landing(runway, approach));
+
+    /// <summary>Lands on a route a tower sent (its fixes, then the final).</summary>
+    public void Land(Runway runway, Approach route) => Land(new Landing(runway, given: route));
+
+    /// <summary>Holds: right-hand circles around a point at an altitude, until told otherwise (a tower's hold).</summary>
+    public void HoldAt(Geo center, double radius, string fix)
     {
-        var landing = new Landing(runway, approach);
+        Start(link =>
+        {
+            var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
+            var g = link.Run(_ => vessel.Flight(vessel.Orbit.Body.ReferenceFrame));
+            var me = new Geo(link.Run(_ => g.Latitude), link.Run(_ => g.Longitude), link.Run(_ => g.MeanAltitude));
+            var target = Holding.Target(link.Run(_ => vessel.Orbit.Body.EquatorialRadius), me, center, radius);
+            _doing = string.Create(CultureInfo.InvariantCulture, $"Holding at {fix}: {center.Altitude:0} m, right turns, waiting for the tower.");
+            return target;
+        }, $"Holding at {fix}.");
+    }
+
+    private void Land(Landing landing)
+    {
+        var runway = landing.Runway;
         _clearance = null;
         string? said = null;
         Start(link =>

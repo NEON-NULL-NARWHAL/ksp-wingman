@@ -91,6 +91,15 @@ Like a real airport, KSC's runway 09 has published approaches, and `land` asks a
 | `RNAV 09 NORTH` | north of the runway, or arriving from the north | KSC-N1 (900 m, 110 m/s): downwind 4 km north → KSC-N2 (800 m, 90 m/s) → base → KSC-N3 (750 m, 90 m/s) on the centerline 11 km out → F09 |
 | `RNAV 09 SOUTH` | south of the runway, or arriving from the south | the same, 4 km south: KSC-S1 → KSC-S2 → KSC-S3 → F09 |
 
+**With LUNA EVO's tower (0.5).** [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control)
+2.11 has a real tower for several agents (rail: Play → KSC tower). Start it there, and give each agent
+`WINGMAN_TOWER_URL=http://localhost:8920/` (in `claude mcp add ... --env`, or the environment of the console). Then the
+agent reports to it every few seconds, answers "say intentions", and `land` asks the tower: one plane is cleared with
+the whole route, the next holds (circling a hold point, stacked 300 m apart) until the first has landed and vacated
+the runway (an agent can't taxi, so it recovers its plane). The tower's last message shows in status.
+
+![LUNA EVO Mission Control's KSC tower page: two agents on the channel, one cleared for RNAV 09 SOUTH, the other holding as number 2](docs/tower.png)
+
 F09 is the final approach fix: on the centerline 8 km out, 628 m up, where the 4° glide slope starts. The tower
 answers like ATC: `KSC tower: Wingman, cleared RNAV 09 SOUTH. Proceed to KSC-S1 at 900 m, 110 m/s, then KSC-S2,
 KSC-S3, F09, land KSC runway 09.` (status shows it while landing). The pilot stays on the line between fixes and

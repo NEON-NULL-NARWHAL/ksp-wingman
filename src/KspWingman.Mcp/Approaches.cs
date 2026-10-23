@@ -68,6 +68,27 @@ public static class Tower
     }
 }
 
+/// <summary>A hold: right-hand circles around a point, at its altitude (a tower holds the second plane like this).</summary>
+public static class Holding
+{
+    public const double Speed = 100;
+
+    /// <summary>
+    /// What to fly to circle <paramref name="center"/> clockwise at <paramref name="radius"/> meters: toward it while
+    /// far, then along the circle with the center on the right, turning in or out to stay on it.
+    /// </summary>
+    public static PlaneTarget Target(double bodyRadius, Geo me, Geo center, double radius)
+    {
+        var (north, east) = Formation.Offset(bodyRadius, me, center);
+        var distance = Math.Sqrt(north * north + east * east);
+        var toCenter = Math.Atan2(east, north) * 180 / Math.PI;
+        var heading = distance > radius * 1.5
+            ? toCenter
+            : toCenter - 90 + Math.Clamp((distance - radius) / radius * 60, -40, 40);
+        return new PlaneTarget((heading + 360) % 360, center.Altitude, Speed);
+    }
+}
+
 /// <summary>Flies an approach's fixes in order: stays on the line between them, turns early, meets heights and speeds.</summary>
 public sealed class Route(Approach approach)
 {

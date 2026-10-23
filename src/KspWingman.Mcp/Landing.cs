@@ -23,7 +23,7 @@ public readonly record struct LandingStep(LandingPhase Phase, PlaneTarget? Targe
 /// Lands on <paramref name="runway"/>. <paramref name="approach"/>: null for the tower's pick of the published approaches
 /// (the default), "visual" for the old hand-made circuit, or an approach's name.
 /// </summary>
-public sealed class Landing(Runway runway, string? approach = null)
+public sealed class Landing(Runway runway, string? approach = null, Approach? given = null)
 {
     public const double GlideSlope = 4; // degrees
     public const double FinalDistance = 8000; // m before touchdown where the final approach starts
@@ -35,7 +35,7 @@ public sealed class Landing(Runway runway, string? approach = null)
     private bool _outside;
     private Route? _route;
     private readonly bool _visual = approach?.Trim().Equals("visual", StringComparison.OrdinalIgnoreCase) == true;
-    private readonly Approach? _asked = approach is { Length: > 0 } a && !a.Trim().Equals("visual", StringComparison.OrdinalIgnoreCase) ? Approach.Find(a) : null;
+    private readonly Approach? _asked = given ?? (approach is { Length: > 0 } a && !a.Trim().Equals("visual", StringComparison.OrdinalIgnoreCase) ? Approach.Find(a) : null);
 
     public Runway Runway => runway;
     public LandingPhase Phase => _phase;

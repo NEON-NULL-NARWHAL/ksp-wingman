@@ -11,7 +11,7 @@ using ModelContextProtocol.Server;
 namespace KspWingman.Mcp;
 
 [McpServerToolType]
-public sealed class Tools(KrpcLink krpc, Director director)
+public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower)
 {
     /// <summary>The longest wait_for_chat may wait (an MCP call shouldn't hang for minutes).</summary>
     internal const int MaxWaitSeconds = 120;
@@ -42,7 +42,9 @@ public sealed class Tools(KrpcLink krpc, Director director)
             }
         }
         text.AppendLine("Pilot: " + director.Doing);
-        if (director.Active && director.Clearance is { } clearance)
+        if (tower.Client?.Heard is { Count: > 0 } heard)
+            text.AppendLine("Tower: " + heard[^1]);
+        else if (director.Active && director.Clearance is { } clearance)
             text.AppendLine("Tower: " + clearance);
         var behind = krpc.Wingman<double>("SecondsBehind");
         if (behind > 1)

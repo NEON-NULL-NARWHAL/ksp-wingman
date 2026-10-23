@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Mcp/Program.cs
-// Starts the MCP server on stdio. Settings (environment): WINGMAN_KRPC_HOST (127.0.0.1), WINGMAN_KRPC_PORT (50000).
+// Starts the MCP server on stdio. Settings (environment): WINGMAN_KRPC_HOST (127.0.0.1), WINGMAN_KRPC_PORT (50000),
+// WINGMAN_TOWER_URL (LUNA EVO Mission Control's KSC tower, e.g. http://localhost:8920/; none: land flies on its own).
 
 using KspWingman.Mcp;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,5 +14,11 @@ var host = Environment.GetEnvironmentVariable("WINGMAN_KRPC_HOST") ?? "127.0.0.1
 var port = int.TryParse(Environment.GetEnvironmentVariable("WINGMAN_KRPC_PORT"), out var p) ? p : 50000;
 builder.Services.AddSingleton(_ => new KrpcLink(host, port));
 builder.Services.AddSingleton(_ => new Director(host, port)); // its own connection: it flies between the tool calls
+builder.Services.AddSingleton(services =>
+    new TowerLink(Uri.TryCreate(Environment.GetEnvironmentVariable("WINGMAN_TOWER_URL"), UriKind.Absolute, out var tower) && tower.Host is "localhost" or "127.0.0.1"
+        ? new TowerClient(tower, host, port, services.GetRequiredService<Director>())
+        : null));
 builder.Services.AddMcpServer().WithStdioServerTransport().WithToolsFromAssembly();
-await builder.Build().RunAsync();
+var app = builder.Build();
+app.Services.GetRequiredService<TowerLink>(); // the tower client reports from the start, not from the first tool call
+await app.RunAsync();
