@@ -25,7 +25,9 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 - **A second KSP for the agent**, on this PC or another one. It's your own copy, running twice. A second PC is
   better: a second KSP takes 3-5 GB of memory and CPU, and a KSP that slows down falls out of step with the others.
 - **[kRPC 0.7.0](https://github.com/krpc/krpc/releases)** in the agent's KSP.
-- **An agent that speaks MCP**, for example [Claude Code](https://claude.com/claude-code).
+- **An agent that speaks MCP**, for example [Claude Code](https://claude.com/claude-code), **or a model on your own
+  PC** through the Wingman console: [Ollama](https://ollama.com), llama.cpp's `llama-server`, or any server with the
+  OpenAI chat API (see [the console](#the-wingman-console-local-models)).
 - Recommended: the **[LUNA EVO patches](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control)** in every
   KSP, so players (and the agent) stay in step in time and see each other.
 
@@ -34,17 +36,25 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 1. Download `KspWingman-<version>.zip` from the [latest release](https://github.com/NEON-NULL-NARWHAL/ksp-wingman/releases/latest).
 2. Into the **agent's** KSP: copy the zip's `GameData/KspWingman` folder into KSP's `GameData`, next to `kRPC` and
    `LunaMultiplayer`.
-3. Put `KspWingman.Mcp.exe` anywhere (one file, nothing to install).
+3. Put `KspWingman.Mcp.exe` and `KspWingman.exe` in one folder, anywhere (single files, nothing to install).
 4. Start the agent's KSP, join your server with LMP (pick a player name for it, e.g. "Wingman"), and let it reach the
    Space Center. kRPC's server should be running (its window: Start server; default port 50000).
-5. Add the MCP server to your agent. In Claude Code:
+5. Then either:
+   - **Claude Code (or another MCP agent):** add the MCP server, then ask your agent to say hello in the chat:
 
-   ```
-   claude mcp add ksp-wingman --env WINGMAN_KRPC_PORT=50000 -- "C:\path\to\KspWingman.Mcp.exe"
-   ```
+     ```
+     claude mcp add ksp-wingman --env WINGMAN_KRPC_PORT=50000 -- "C:\path\to\KspWingman.Mcp.exe"
+     ```
 
-   For an agent's KSP on another PC, add `--env WINGMAN_KRPC_HOST=<its address>` (and allow kRPC's ports there).
-6. Ask your agent to say hello in the chat.
+     For an agent's KSP on another PC, add `--env WINGMAN_KRPC_HOST=<its address>` (and allow kRPC's ports there).
+   - **A local model:** install [Ollama](https://ollama.com), get a small model, and start the console:
+
+     ```
+     ollama pull qwen3:4b-instruct
+     KspWingman --model qwen3:4b-instruct --krpc-port 50000 --allow "YourName"
+     ```
+
+     Then type an order ("take off and fly east at 1000 m"), or say "Wingman, take off" in LMP's chat.
 
 ## The tools
 
@@ -56,16 +66,16 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 | `send_chat` | Says one line in LMP's chat, as the agent's player. |
 | `wait_for_chat` | Waits until someone else says something (up to 2 minutes), then returns the new lines. |
 
-**Flying (0.2):**
+**Flying:**
 
 | Tool | What it does |
 |---|---|
 | `launchable_craft` | The craft the agent's KSP can launch, from the VAB and the SPH. |
 | `launch` | Launches a craft onto the runway (planes, rovers) or the launch pad (rockets). |
-| `take_off` | Takes a plane off the runway: rolls straight on the nose wheel, lifts off at takeoff speed, gear up, climbs out, then flies on at the heading, altitude and speed given. |
+| `take_off` | Takes a plane off the runway: rolls straight along the runway on the nose wheel, lifts off at takeoff speed, gear up, climbs out, then turns to the heading and flies on at the altitude and speed given. |
 | `fly` | Flies the plane at a heading, altitude and speed, and keeps it there. Turns by banking, at most 30°. |
 | `follow` | Formation on another player: a slot to their right, behind, above (default 40 m right, 50 m behind), never closer than 30 m. From further than 2 km it flies straight at them first (even head-on), and closes no faster than it can slow down again. |
-| `land` | Lands on KSC's runway from anywhere in the air: out to the final approach 8 km west of KSC, down a 4° glide slope, flare, roll out on the centerline, brakes. Goes around by itself if it isn't lined up. |
+| `land` | Lands on KSC's runway (landing east) from anywhere in the air: a circuit out to the final approach 8 km west of KSC, down a 4° glide slope, flare, roll out on the centerline, brakes. Goes around by itself if it isn't lined up, is too high, or the ground comes up too close, and tries again. Takes a few minutes. |
 | `stop_following` | Holds the current heading, height and speed. |
 | `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
 
@@ -81,20 +91,41 @@ mid-flight, it turns SAS on first.
 **Guardrails, built into the bridge:** chat lines are one line, at most 300 characters, at most one a second. The agent
 only ever controls its own KSP; LMP's locks keep it off everyone else's vessels.
 
-## The Wingman console: local models (0.3)
+## The Wingman console: local models
 
-`KspWingman.exe` lets a model on your own PC fly: [Ollama](https://ollama.com), llama.cpp's `llama-server`, or any
-server with the OpenAI chat API. It starts `KspWingman.Mcp.exe` (put both in one folder) and uses the same tools.
+`KspWingman.exe` lets a model on your own PC (or your own server) fly: [Ollama](https://ollama.com), llama.cpp's
+`llama-server`, or any server with the OpenAI chat API. It starts `KspWingman.Mcp.exe` (put both in one folder) and
+uses the same tools.
 
 ```
 KspWingman --model qwen3:4b-instruct --krpc-port 50000 --allow "YourName,FriendName"
 ```
 
-- **Orders** come from the console (type "take off and fly east at 1000 m") or from LMP's chat: players on `--allow`
-  start a line with the call sign, `Wingman, follow me` (`--call-sign` changes it). The answer goes back where the order
-  came from. No `--allow`, no chat orders.
-- `--llm http://127.0.0.1:8080/v1/` for llama.cpp; `--api-key` for a server that wants one. `/status`, `/forget`,
-  `/quit` in the console.
+**Orders** come from the console (type "take off and fly east at 1000 m") or from LMP's chat: players on `--allow`
+start a line with the call sign (`Wingman, follow me`, `@Wingman land`) or the agent's player name. The answer goes
+back where the order came from, as one chat line. Without `--allow`, chat orders are off.
+
+| Option | What it does | Default |
+|---|---|---|
+| `--model` | The model's name on the server (for Ollama, one from `ollama list`). Required. | |
+| `--llm` | The server's OpenAI-compatible address: `http://127.0.0.1:8080/v1/` for llama.cpp, another PC's address for a model server elsewhere. | `http://127.0.0.1:11434/v1/` (Ollama) |
+| `--api-key` | For a server that wants one. | none |
+| `--krpc-host`, `--krpc-port` | Where the agent's KSP runs kRPC. | `127.0.0.1`, `50000` |
+| `--allow` | Players who may give orders in chat, comma-separated. | none (chat orders off) |
+| `--call-sign` | What players call the agent in chat. | `Wingman` |
+| `--mcp` | Path to `KspWingman.Mcp.exe`. | next to `KspWingman.exe` |
+| `--think` | Let a thinking model think (slow: 20+ s per answer). | off |
+
+The same settings can come from the environment: `WINGMAN_MODEL`, `WINGMAN_LLM_URL`, `WINGMAN_LLM_KEY`,
+`WINGMAN_KRPC_HOST`, `WINGMAN_KRPC_PORT`.
+
+**In the console:** `/status` (where the agent is), `/forget` (clears the conversation), `/quit`. While the pilot is
+still flying, `/quit` warns first: quitting stops the pilot and leaves the plane on SAS with nobody flying it. Type
+`/quit` again to leave anyway.
+
+**Guardrails in the console:** the model never gets the chat tools (the console reads the chat and says the answers
+itself, so it can't flood the chat); only players on `--allow` can give orders; answers are one line without emoji.
+
 A real session in the test rig (another player, RigPilot, giving orders in LMP's chat; the model is Qwen3 4B
 instruct on the same PC as both KSPs):
 
@@ -121,16 +152,24 @@ instruct on the same PC as both KSPs):
 *`land` in the rig: down the glide slope to the touchdown point, 4 m off the centerline; it stopped 1,161 m down the
 runway.*
 
-- **Which model:** a small non-thinking one. On a 16 GB card next to KSP, `qwen3:4b-instruct` (3 GB) answers in about
-  a second and passed 21 of 21 orders in our eval (in the game it missed one of five: it answered "come back and land" with `fly` once, and with `land` when asked again); thinking models take 20+ s per answer. The console helps small
-  models along: it reads tool calls they write out as text, and when one says "Following you!" without calling
-  `follow`, it tells it so. `tests/ModelEval` tries any model on the same orders without KSP.
+**Which model:** a small non-thinking one. On a 16 GB card next to two KSPs, `qwen3:4b-instruct` (3 GB) answers in
+about a second and passed 21 of 21 orders in our eval. In the game it missed one of five: it answered "come back and
+land" with `fly` once, and with `land` when asked again. Thinking models take 20+ s per answer. The console helps
+small models along: it reads tool calls they write out as text, and when one says "Following you!" without calling
+`follow`, it tells it so. To try another model on the same orders, without KSP:
+
+```
+dotnet run --project tests/ModelEval -- "C:\path\to\KspWingman.Mcp.exe" <model> [server URL] [runs per order]
+```
 
 ## How it works
 
 - **The bridge** (`src/KspWingman.Bridge`, a KSP mod) adds a kRPC service called `Wingman` for what kRPC can't see by
   itself: LMP's chat, players and time. It runs on KSP's main thread, like LMP's own windows.
 - **The MCP server** (`src/KspWingman.Mcp`, .NET 10) connects to kRPC in the agent's KSP and turns the game into tools.
+  Its pilot (`Pilot`, `Formation`, `Landing`) flies between the agent's calls.
+- **The console** (`src/KspWingman.Tui`, .NET 10) is an agent of its own for local models: it starts the MCP server,
+  sends the model the orders and the tools, and runs the tools it asks for.
 - Nothing new goes over LMP's network: the agent is a normal LMP player.
 
 ## Building it
@@ -139,7 +178,13 @@ runway.*
 DLLs the bridge builds against are in `lib/` (see [`lib/THIRD-PARTY.md`](lib/THIRD-PARTY.md)), and KSP's and Unity's
 names come from LUNA EVO's own stand-ins in `src/Stubs` (no Squad or Unity code).
 
-`tests/mcp_smoke.py` talks MCP to the server like an agent's host would, against a real KSP.
+Tools for working on it, against a real KSP:
+
+- `tests/mcp_smoke.py <KspWingman.Mcp.exe> <kRPC port> tool[:json] ... sleep:N` talks MCP to the server like an
+  agent's host would, e.g. `"take_off:{\"altitude\":600}" "land:{}" sleep:10 status`.
+- `tests/FlightLab <kRPC port> probe|hold|show|wreck|camera` flies or inspects the plane straight through kRPC, for
+  tuning the pilot.
+- `tests/ModelEval` (above) scores a model without KSP.
 
 ## How it was made
 
@@ -147,7 +192,8 @@ Written by Claude (Anthropic's AI model), directed and reviewed by the project o
 Version 0.1 was checked with two real KSPs on one LMP server: the agent's chat reached the other player, and the
 other player's reply reached the agent. Version 0.2 was flown in the same rig: two agents, each in its own KSP, one
 holding a course and the other taking off and joining it in formation (and, on the way there, crashing a few planes
-into the sea; the fixes are in the changelog).
+into the sea; the fixes are in the changelog). Version 0.3 too: `land` from anywhere in the air, and a local 4B model
+taking orders from the other player's chat, launching, taking off and landing.
 
 ## License
 
