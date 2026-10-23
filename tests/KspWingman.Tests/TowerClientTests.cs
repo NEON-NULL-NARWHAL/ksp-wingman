@@ -45,6 +45,20 @@ public sealed class TowerClientTests
         Assert.InRange(approach.Fixes[0].Cross, -4010, -3990);
         Assert.Equal(628, approach.Fixes[1].Altitude);
         Assert.Null(TowerClient.Route(new JsonObject { ["name"] = "x" })); // no fixes
+        // Audit 13 (T3): not to be flown, whoever sent it: into the ground, far away, too fast, too many fixes.
+        JsonObject One(double along, double cross, double altitude, double speed) => new()
+        {
+            ["fixes"] = new JsonArray(new JsonObject { ["name"] = "x", ["latitude"] = Lat(cross), ["longitude"] = Lon(along, cross), ["altitude"] = altitude, ["speed"] = speed }),
+        };
+        Assert.NotNull(TowerClient.Route(One(-8000, 0, 628, 90)));
+        Assert.Null(TowerClient.Route(One(-8000, 0, 50, 90)));
+        Assert.Null(TowerClient.Route(One(-90_000, 0, 900, 90)));
+        Assert.Null(TowerClient.Route(One(-8000, 0, 900, 900)));
+        Assert.Null(TowerClient.Route(new JsonObject { ["fixes"] = new JsonArray(Enumerable.Range(0, 13).Select(_ => (JsonNode)new JsonObject
+            { ["latitude"] = Lat(0), ["longitude"] = Lon(-8000, 0), ["altitude"] = 900, ["speed"] = 90 }).ToArray()) }));
+        Assert.NotNull(TowerClient.Hold(new JsonObject { ["latitude"] = Lat(7000), ["longitude"] = Lon(4000, 7000), ["altitude"] = 1200, ["radius"] = 2000 }));
+        Assert.Null(TowerClient.Hold(new JsonObject { ["latitude"] = Lat(7000), ["longitude"] = Lon(4000, 7000), ["altitude"] = 100, ["radius"] = 2000 }));
+        Assert.Null(TowerClient.Hold(new JsonObject { ["latitude"] = Lat(7000), ["longitude"] = Lon(4000, 7000), ["altitude"] = 1200, ["radius"] = 50 }));
         Assert.Null(TowerClient.Route(new JsonObject { ["fixes"] = new JsonArray(new JsonObject { ["latitude"] = "north" }) }));
     }
 }

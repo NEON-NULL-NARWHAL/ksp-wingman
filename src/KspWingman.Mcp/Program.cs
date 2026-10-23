@@ -16,7 +16,8 @@ builder.Services.AddSingleton(_ => new KrpcLink(host, port));
 builder.Services.AddSingleton(_ => new Director(host, port)); // its own connection: it flies between the tool calls
 builder.Services.AddSingleton(services =>
     new TowerLink(Uri.TryCreate(Environment.GetEnvironmentVariable("WINGMAN_TOWER_URL"), UriKind.Absolute, out var tower) && tower.Host is "localhost" or "127.0.0.1"
-        ? new TowerClient(tower, host, port, services.GetRequiredService<Director>())
+        // As localhost: the tower's listener only answers to that name (127.0.0.1 gets a 400 from Windows' HTTP.sys).
+        ? new TowerClient(new UriBuilder(tower) { Host = "localhost" }.Uri, host, port, services.GetRequiredService<Director>())
         : null));
 builder.Services.AddMcpServer().WithStdioServerTransport().WithToolsFromAssembly();
 var app = builder.Build();

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1 (2026-10-23)
+
+### Security
+- The agent only flies a tower's route or hold that makes sense (LUNA EVO Mission Control's audit 13, T3): at most 12
+  fixes, each within 60 km of KSC, at 400-5,000 m and 60-250 m/s; a hold within 60 km, at 400-5,000 m, on a 1-5 km
+  circle. Anything else is refused, and status says so.
+- A tower address of 127.0.0.1 is used as localhost (the tower's listener only answers to that name).
+
 ## 0.5.0 (2026-10-23): a real tower
 
 ### Added

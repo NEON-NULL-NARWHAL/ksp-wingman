@@ -128,9 +128,12 @@ public sealed class TowerClient : IDisposable
                 case "clearance" when Route(m["route"]) is { } approach:
                     _director.Land(Runway.Ksc, approach);
                     break;
-                case "hold" when m["hold"] is JsonObject h && Number(h, "latitude") is { } lat && Number(h, "longitude") is { } lon:
-                    _director.HoldAt(new Geo(lat, lon, Number(h, "altitude") ?? 1200), Number(h, "radius") ?? 2000,
-                        h["fix"] is JsonValue fx && fx.TryGetValue<string>(out var fix) ? fix : "the hold");
+                case "hold" when Hold(m["hold"]) is { } hold:
+                    _director.HoldAt(hold.Center, hold.Radius, hold.Fix);
+                    break;
+                case "clearance" or "hold":
+                    lock (_heard)
+                        _heard.Add($"{DateTime.Now:HH:mm:ss} (refused: the tower's {kind} wasn't a safe one to fly)");
                     break;
                 case "vacate":
                     // A plane can't taxi: it's recovered once stopped (back to the Space Center), which clears the runway.
@@ -156,20 +159,50 @@ public sealed class TowerClient : IDisposable
         return _director.Active ? "local flight: " + doing : "on the ground";
     }
 
-    /// <summary>The tower's route as an approach Wingman flies (fixes placed by KSC's runway).</summary>
+    /// <summary>
+    /// A hold the tower sent, or null when it isn't one to fly (audit 13, T3: anything on this PC can talk on the
+    /// tower's channel, so the agent checks what it's told: near KSC, a sane height and circle).
+    /// </summary>
+    internal static (Geo Center, double Radius, string Fix)? Hold(JsonNode? node)
+    {
+        if (node is not JsonObject h || Number(h, "latitude") is not { } lat || Number(h, "longitude") is not { } lon)
+            return null;
+        var altitude = Number(h, "altitude") ?? 1200;
+        var radius = Number(h, "radius") ?? 2000;
+        if (!NearKsc(lat, lon) || altitude is < MinAltitude or > MaxAltitude || radius is < 1000 or > 5000)
+            return null;
+        var fix = h["fix"] is JsonValue fx && fx.TryGetValue<string>(out var f) ? f[..Math.Min(f.Length, 20)] : "the hold";
+        return (new Geo(lat, lon, altitude), radius, fix);
+    }
+
+    /// <summary>Fixes the agent flies for a tower: within this of KSC (m), these heights (m) and speeds (m/s), this many.</summary>
+    public const double MaxDistance = 60_000, MinAltitude = 400, MaxAltitude = 5000, MinSpeed = 60, MaxSpeed = 250;
+    public const int MaxFixes = 12;
+
+    private static bool NearKsc(double lat, double lon)
+    {
+        var (north, east) = Formation.Offset(600_000, Runway.Ksc.Threshold, new Geo(lat, lon, 0));
+        return Math.Sqrt(north * north + east * east) <= MaxDistance;
+    }
+
+    /// <summary>The tower's route as an approach Wingman flies (fixes placed by KSC's runway), or null when it isn't safe.</summary>
     internal static Approach? Route(JsonNode? node)
     {
-        if (node is not JsonObject route || route["fixes"] is not JsonArray fixes || fixes.Count == 0)
+        if (node is not JsonObject route || route["fixes"] is not JsonArray fixes || fixes.Count is 0 or > MaxFixes)
             return null;
         var landing = new Landing(Runway.Ksc);
         var list = new List<Fix>();
         foreach (var f in fixes.OfType<JsonObject>())
         {
-            if (Number(f, "latitude") is not { } lat || Number(f, "longitude") is not { } lon)
+            if (Number(f, "latitude") is not { } lat || Number(f, "longitude") is not { } lon || !NearKsc(lat, lon))
+                return null;
+            var altitude = Number(f, "altitude") ?? 900;
+            var speed = Number(f, "speed") ?? 110;
+            if (altitude is < MinAltitude or > MaxAltitude || speed is < MinSpeed or > MaxSpeed)
                 return null;
             var (along, cross) = landing.RunwayFrame(600_000, new Geo(lat, lon, 0));
             var name = f["name"] is JsonValue n && n.TryGetValue<string>(out var ns) ? ns : "fix";
-            list.Add(new Fix(name, along, cross, Number(f, "altitude") ?? 900, Number(f, "speed") ?? 110));
+            list.Add(new Fix(name[..Math.Min(name.Length, 20)], along, cross, altitude, speed));
         }
         var title = route["name"] is JsonValue rn && rn.TryGetValue<string>(out var rs) ? rs : "the tower's route";
         return new Approach(title, Runway.Ksc, "cleared by KSC tower", list);
