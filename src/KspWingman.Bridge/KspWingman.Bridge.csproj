@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The KSP mod in the agent's KSP: a kRPC service ("Wingman") for what kRPC itself can't see: LMP's chat, players and
+       time. Builds anywhere, no KSP needed: kRPC (LGPL) and LMP (MIT) are in lib/. In the game, KSP's own are used. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Version>0.1.0</Version>
+    <AssemblyName>KspWingman.Bridge</AssemblyName>
+    <RootNamespace>KspWingman.Bridge</RootNamespace>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- KSP's and Unity's names, from stand-ins (no Squad or Unity code; see src/Stubs). -->
+    <ProjectReference Include="..\Stubs\AssemblyCSharp\AssemblyCSharp.csproj" Private="false" />
+    <ProjectReference Include="..\Stubs\UnityCoreModule\UnityCoreModule.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="KRPC.Core"><HintPath>..\..\lib\kRPC\KRPC.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Google.Protobuf"><HintPath>..\..\lib\kRPC\Google.Protobuf.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="LmpClient"><HintPath>..\..\lib\LmpClient\LmpClient.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Lidgren.Network"><HintPath>..\..\lib\LmpClient\Lidgren.Network.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KspWingman.Bridge/KspWingman.Bridge.csproj" />
+    <Project Path="src/KspWingman.Mcp/KspWingman.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/src/Stubs/">
+    <Project Path="src/Stubs/AssemblyCSharp/AssemblyCSharp.csproj" />
+    <Project Path="src/Stubs/UnityCoreModule/UnityCoreModule.csproj" />
+    <Project Path="src/Stubs/UnityIMGUIModule/UnityIMGUIModule.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KspWingman.Tests/KspWingman.Tests.csproj" />
+  </Folder>
+</Solution>
