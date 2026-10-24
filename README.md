@@ -204,7 +204,9 @@ instruct on the same PC as both KSPs):
 
 *`land` in the rig (0.4): the tower's RNAV 09 SOUTH, then the flare, touchdown and rollout, 3 m off the centerline.*
 
-**Which model:** a small non-thinking one. On a 16 GB card next to two KSPs, `qwen3:4b-instruct` (3 GB) answers in
+**Which model:** `gemma4:e4b` (0.8) passes the same 24 of 24 orders and is also the best planner in PlannerEval, so it
+can do both with `--model gemma4:e4b --planner-model gemma4:e4b`; it takes 0.4 GB of the graphics card next to two
+KSPs. Before that: a small non-thinking one. On a 16 GB card next to two KSPs, `qwen3:4b-instruct` (3 GB) answers in
 about a second and passed 24 of 24 orders in our eval. In the game it missed one of five: it answered "come back and
 land" with `fly` once, and with `land` when asked again. Thinking models take 20+ s per answer. The console helps
 small models along: it reads tool calls they write out as text, and when one says "Following you!" without calling

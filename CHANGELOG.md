@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 (2026-10-24): runway in sight
+
+### Added
+- **"Runway in sight"** (the owner's idea): on final, within 10 km of the touchdown point and 300 m of the centerline,
+  the agent calls the runway in sight to LUNA EVO's tower (Mission Control 2.14), which clears it to land.
+
+### Changed
+- **gemma4:e4b as the pilot**: ModelEval 24/24 in 56 s (qwen3:4b-instruct: 24/24). With it as the planner too, two rig
+  agents flew free flight on that one model (0.4 GB of the graphics card next to two KSPs): short visuals 12, 8 and 6 m
+  off the centerline, every landing cleared after "runway in sight".
+
 ## 0.7.1 (2026-10-24)
 
 ### Changed

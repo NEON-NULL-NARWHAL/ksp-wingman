@@ -30,6 +30,7 @@ public sealed class TowerClient : IDisposable
     private readonly List<string> _heard = [];
     private string? _callSign;
     private bool _wantsToLand;
+    private bool _calledSight;
 
     private readonly FlightEvents? _events;
 
@@ -101,6 +102,12 @@ public sealed class TowerClient : IDisposable
             };
         });
         await Handle(await PostAsync("v1/report", report));
+        // On final and lined up: "runway in sight", once an approach; the tower answers with the landing clearance.
+        if (!_calledSight && _director.Doing.StartsWith("Landing, on final", StringComparison.Ordinal) && LinedUp(_director.Doing))
+        {
+            _calledSight = true;
+            await SayAsync("runway-in-sight", "runway in sight");
+        }
     }
 
     private async Task<List<string>> SayAsync(string kind, string text)
@@ -190,6 +197,7 @@ public sealed class TowerClient : IDisposable
                     await SayAsync("intent", Intent());
                     break;
                 case "clearance" when Route(m["route"]) is { } approach:
+                    _calledSight = false;
                     _director.Land(Runway.Ksc, approach);
                     break;
                 case "hold" when Hold(m["hold"]) is { } hold:
@@ -244,6 +252,14 @@ public sealed class TowerClient : IDisposable
     {
         var (north, east) = Formation.Offset(600_000, Runway.Ksc.Threshold, new Geo(lat, lon, 0));
         return Math.Sqrt(north * north + east * east) <= MaxDistance;
+    }
+
+    /// <summary>The pilot's "Landing, on final: 6.4 km before the touchdown point, 193 m left of ..." within 10 km and 300 m.</summary>
+    internal static bool LinedUp(string doing)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(doing, @"on final: ([\d.]+) km before the touchdown point, (\d+) m");
+        return m.Success && double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) <= 10 &&
+               double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) <= 300;
     }
 
     /// <summary>The tower's route as an approach Wingman flies (fixes placed by KSC's runway), or null when it isn't safe.</summary>
