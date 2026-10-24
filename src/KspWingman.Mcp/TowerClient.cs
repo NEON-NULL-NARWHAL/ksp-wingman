@@ -30,8 +30,11 @@ public sealed class TowerClient : IDisposable
     private string? _callSign;
     private bool _wantsToLand;
 
-    public TowerClient(Uri tower, string host, int port, Director director)
+    private readonly FlightEvents? _events;
+
+    public TowerClient(Uri tower, string host, int port, Director director, FlightEvents? events = null)
     {
+        _events = events;
         _tower = tower;
         _link = new KrpcLink(host, port);
         _director = director;
@@ -114,6 +117,7 @@ public sealed class TowerClient : IDisposable
             var kind = m["kind"] is JsonValue k && k.TryGetValue<string>(out var ks) ? ks : "";
             var text = m["text"] is JsonValue t && t.TryGetValue<string>(out var ts) ? ts : "";
             texts.Add(text);
+            _events?.Add("tower", text, new { kind });
             lock (_heard)
             {
                 _heard.Add($"{DateTime.Now:HH:mm:ss} {text}");
@@ -136,14 +140,10 @@ public sealed class TowerClient : IDisposable
                         _heard.Add($"{DateTime.Now:HH:mm:ss} (refused: the tower's {kind} wasn't a safe one to fly)");
                     break;
                 case "vacate":
-                    // A plane can't taxi: it's recovered once stopped (back to the Space Center), which clears the runway.
-                    _link.Run(c =>
-                    {
-                        var v = c.SpaceCenter().ActiveVessel;
-                        if (v.Situation == VesselSituation.Landed && v.Flight(v.Orbit.Body.ReferenceFrame).Speed < 2 && v.Recoverable)
-                            v.Recover();
-                        return 0;
-                    });
+                    // Stopped on the runway: taxi off it and park beside it (the tower sees it clear by its position).
+                    if (_link.Run(c => c.SpaceCenter().ActiveVessel is var v && v.Situation == VesselSituation.Landed &&
+                                       v.Flight(v.Orbit.Body.ReferenceFrame).Speed < 2))
+                        _director.Vacate(Runway.Ksc);
                     _wantsToLand = false;
                     break;
             }

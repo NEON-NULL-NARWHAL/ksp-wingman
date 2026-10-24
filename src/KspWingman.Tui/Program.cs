@@ -3,7 +3,8 @@
 // allow list, starting with the call sign); a model flies the agent's KSP and its answer goes back the same way.
 //
 //   KspWingman --model qwen3:4b [--llm http://127.0.0.1:11434/v1/] [--krpc-port 50000] [--allow "Ann,Bob"]
-//              [--call-sign Wingman] [--mcp path\to\KspWingman.Mcp.exe] [--api-key ...] [--think]
+//              [--call-sign Wingman] [--mcp path\to\KspWingman.Mcp.exe] [--api-key ...] [--think] [--ipc]
+// --ipc: JSON lines in and out, for a host app (Mission Control's Wingman tab); see Ipc.cs.
 
 using System.Globalization;
 using System.Threading.Channels;
@@ -18,6 +19,7 @@ if (options.Problem is { } problem)
     return 2;
 }
 
+Ui.Ipc = options.Ipc;
 using var quit = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; quit.Cancel(); };
 Ui.Line("wingman", $"KSP Wingman console. Model {options.Model} at {options.LlmUrl}; agent's KSP on kRPC port {options.KrpcPort}.");
@@ -44,10 +46,18 @@ var orders = Channel.CreateUnbounded<(string From, string Text, bool FromChat)>(
 _ = Task.Run(async () =>
 {
     while (!quit.IsCancellationRequested && Console.ReadLine() is { } typed)
-        if (typed.Trim().Length > 0)
+    {
+        if (options.Ipc)
+        {
+            if (Ipc.Read(typed) is { } input)
+                await orders.Writer.WriteAsync((input.From, input.Text, false));
+        }
+        else if (typed.Trim().Length > 0)
             await orders.Writer.WriteAsync(("Commander", typed.Trim(), false));
+    }
     quit.Cancel();
 });
+_ = Task.Run(() => ForwardEvents(tools, quit.Token));
 if (options.Allowed.Count > 0)
     _ = Task.Run(() => ListenToChat(tools, options, me, orders.Writer, quit.Token));
 
@@ -56,6 +66,8 @@ try
 {
     await foreach (var (from, text, fromChat) in orders.Reader.ReadAllAsync(quit.Token))
     {
+        if (text == "/quit!")
+            break;
         if (text.Equals("/quit", StringComparison.OrdinalIgnoreCase))
         {
             // Quitting stops the pilot (the MCP server goes with the console), and SAS alone held a landing plane in its
@@ -79,7 +91,7 @@ try
         }
         if (text.Equals("/status", StringComparison.OrdinalIgnoreCase))
         {
-            Ui.Line("result", await tools.CallAsync("status", new Dictionary<string, object?>(), quit.Token));
+            Ui.Line(options.Ipc ? "status" : "result", await tools.CallAsync("status", new Dictionary<string, object?>(), quit.Token)); // a host app tells it from tool results
             continue;
         }
         Ui.Line(fromChat ? "chat" : "order", $"{from}: {text}");
@@ -102,6 +114,33 @@ catch (OperationCanceledException)
 }
 Ui.Line("wingman", "Bye. The plane keeps doing what it was last told; stop_flying hands it back.");
 return 0;
+
+// The MCP server's own events (phases, flight outcomes, the tower's messages), every 2 s: shown, or passed on in --ipc.
+static async Task ForwardEvents(McpTools tools, CancellationToken cancel)
+{
+    long last = 0;
+    while (!cancel.IsCancellationRequested)
+    {
+        try
+        {
+            var text = await tools.CallAsync("events", new Dictionary<string, object?> { ["afterId"] = last }, cancel);
+            foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(line) is not System.Text.Json.Nodes.JsonObject e ||
+                    e["id"] is not System.Text.Json.Nodes.JsonValue id || !id.TryGetValue<long>(out var n))
+                    continue;
+                last = Math.Max(last, n);
+                var kind = e["kind"]?.GetValue<string>() ?? "event";
+                Ui.Line(kind == "outcome" ? "flight" : kind, e["text"]?.GetValue<string>() ?? "", e["data"]);
+            }
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidOperationException or IOException or HttpRequestException)
+        {
+            // The MCP server busy or an old one without events: try again later.
+        }
+        await Task.Delay(2000, cancel).ContinueWith(_ => { });
+    }
+}
 
 static async Task ListenToChat(McpTools tools, Options options, string me, ChannelWriter<(string, string, bool)> orders, CancellationToken cancel)
 {
@@ -129,12 +168,12 @@ static async Task ListenToChat(McpTools tools, Options options, string me, Chann
 }
 
 internal sealed record Options(Uri LlmUrl, string Model, string? ApiKey, string KrpcHost, int KrpcPort, string McpExe,
-    string CallSign, IReadOnlyCollection<string> Allowed, bool Think, string? Problem)
+    string CallSign, IReadOnlyCollection<string> Allowed, bool Think, string? Problem, bool Ipc = false)
 {
     public const string Usage =
         "Usage: KspWingman --model <name> [--llm <OpenAI-compatible URL, default Ollama: http://127.0.0.1:11434/v1/>] " +
         "[--api-key <key>] [--krpc-host 127.0.0.1] [--krpc-port 50000] [--mcp <KspWingman.Mcp.exe>] " +
-        "[--call-sign Wingman] [--allow \"Player1,Player2\"] [--think]";
+        "[--call-sign Wingman] [--allow \"Player1,Player2\"] [--think] [--ipc]";
 
     public static Options Parse(string[] args)
     {
@@ -161,7 +200,8 @@ internal sealed record Options(Uri LlmUrl, string Model, string? ApiKey, string 
         var allowed = (Get("--allow") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return new Options(problem == null ? new Uri(url) : new Uri("http://invalid/"), model ?? "", Get("--api-key", "WINGMAN_LLM_KEY"),
             Get("--krpc-host", "WINGMAN_KRPC_HOST") ?? "127.0.0.1", problem == null ? int.Parse(port, CultureInfo.InvariantCulture) : 0,
-            mcp, Get("--call-sign") ?? "Wingman", allowed, args.Any(a => a.Equals("--think", StringComparison.OrdinalIgnoreCase)), problem);
+            mcp, Get("--call-sign") ?? "Wingman", allowed, args.Any(a => a.Equals("--think", StringComparison.OrdinalIgnoreCase)), problem,
+            args.Any(a => a.Equals("--ipc", StringComparison.OrdinalIgnoreCase)));
     }
 }
 
@@ -169,8 +209,17 @@ internal static class Ui
 {
     private static readonly Lock Gate = new();
 
-    public static void Line(string kind, string text)
+    /// <summary>--ipc: every line goes out as JSON (Ipc.Write) instead of colored text.</summary>
+    public static bool Ipc { get; set; }
+
+    public static void Line(string kind, string text, System.Text.Json.Nodes.JsonNode? data = null)
     {
+        if (Ipc)
+        {
+            lock (Gate)
+                Console.WriteLine(KspWingman.Tui.Ipc.Write(kind, text, data));
+            return;
+        }
         var (label, color) = kind switch
         {
             "order" => ("you ", ConsoleColor.White),
@@ -179,6 +228,9 @@ internal static class Ui
             "result" => ("  ->", ConsoleColor.DarkGray),
             "answer" => ("ai  ", ConsoleColor.Green),
             "error" => ("err ", ConsoleColor.Red),
+            "flight" => ("fly ", ConsoleColor.Magenta),
+            "tower" => ("twr ", ConsoleColor.Cyan),
+            "phase" => ("    ", ConsoleColor.DarkGray),
             _ => ("··· ", ConsoleColor.Gray),
         };
         lock (Gate)

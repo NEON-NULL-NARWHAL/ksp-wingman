@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0 (2026-10-23): events, --ipc, taxiing
+
+### Added
+- **Flight events**: the MCP server watches the plane (once a second, its own kRPC link) and keeps what happened:
+  phases (parked, taking off, climbing, cruising, descending, on a route, holding, on final, flaring, rolling out,
+  stopped, taxiing, crashed, splashed), each flight's **outcome** (landed, crashed, splashed, ended in the air, landed
+  off a runway; minutes, go-arounds, the approach, and for a landing how far down the runway it stopped, how far off
+  the centerline and the heading) and the tower's messages. New tool `events(afterId)`; `WINGMAN_EVENTS_LOG` writes
+  them to a file too. The console shows them.
+- **`--ipc`** on the console: JSON lines in (orders, status, forget, quit) and out (everything it shows, plus the
+  events), for apps. LUNA EVO Mission Control 2.12's Wingman page uses it.
+- **Taxiing off the runway**: told to vacate, the agent turns right at walking pace (6 m/s, braking above 9) and
+  parks 90 m beside the runway, brakes on, instead of recovering the plane. The tower clears the next plane once it's
+  off.
+
 ## 0.5.1 (2026-10-23)
 
 ### Security

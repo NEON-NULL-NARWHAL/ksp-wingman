@@ -80,6 +80,7 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 | `approaches` | The published approaches and their fixes, with the height and speed to cross each at (see [the tower](#the-tower-and-its-approaches)). |
 | `stop_following` | Holds the current heading, height and speed. |
 | `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
+| `events` | What happened since an event number, as JSON lines: flight phases (parked, taking off, climbing, cruising, on a route, holding, on final, flaring, rolling out, stopped, taxiing, crashed...), each flight's outcome (landed and where on the runway, crashed, splashed, go-arounds, the approach flown) and the tower's messages. For apps watching agents; the console shows them too. |
 
 ### The tower and its approaches
 
@@ -96,7 +97,8 @@ Like a real airport, KSC's runway 09 has published approaches, and `land` asks a
 `WINGMAN_TOWER_URL=http://localhost:8920/` (in `claude mcp add ... --env`, or the environment of the console). Then the
 agent reports to it every few seconds, answers "say intentions", and `land` asks the tower: one plane is cleared with
 the whole route, the next holds (circling a hold point, stacked 300 m apart) until the first has landed and vacated
-the runway (an agent can't taxi, so it recovers its plane). The tower's last message shows in status.
+the runway. Told to vacate (0.6), the agent taxis off to the right at walking pace and parks 90 m beside the runway,
+brakes on; the tower clears the next plane as soon as it's off. The tower's last message shows in status.
 
 ![LUNA EVO Mission Control's KSC tower page: two agents on the channel, one cleared for RNAV 09 SOUTH, the other holding as number 2](docs/tower.png)
 
@@ -141,9 +143,18 @@ back where the order came from, as one chat line. Without `--allow`, chat orders
 | `--call-sign` | What players call the agent in chat. | `Wingman` |
 | `--mcp` | Path to `KspWingman.Mcp.exe`. | next to `KspWingman.exe` |
 | `--think` | Let a thinking model think (slow: 20+ s per answer). | off |
+| `--ipc` | For an app running the console (LUNA EVO Mission Control's Wingman page): one JSON object a line in and out, see below. | off |
 
 The same settings can come from the environment: `WINGMAN_MODEL`, `WINGMAN_LLM_URL`, `WINGMAN_LLM_KEY`,
-`WINGMAN_KRPC_HOST`, `WINGMAN_KRPC_PORT`.
+`WINGMAN_KRPC_HOST`, `WINGMAN_KRPC_PORT`. `WINGMAN_EVENTS_LOG=<file>` (for the MCP server) also writes every event
+to a file, one JSON line each.
+
+**`--ipc`:** the console reads `{"type":"order","text":"land at KSC","from":"Commander"}`, `{"type":"status"}`,
+`{"type":"forget"}` or `{"type":"quit"}` (quits without asking), one a line (plain text is an order), and writes
+everything as `{"type":"event","time":...,"kind":...,"text":...,"data":...}`: kinds `order`, `chat`, `call`, `result`,
+`answer`, `status`, `error`, `wingman`, and every 2 s the MCP server's events: `phase`, `flight` (an outcome) and
+`tower`. [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control) 2.12 installs
+Wingman, its mod and a model, and runs agents this way (rail: Play → Wingman).
 
 **In the console:** `/status` (where the agent is), `/forget` (clears the conversation), `/quit`. While the pilot is
 still flying, `/quit` warns first: quitting stops the pilot and leaves the plane on SAS with nobody flying it. Type

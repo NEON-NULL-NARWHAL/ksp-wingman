@@ -100,14 +100,55 @@ public sealed class Director(string host, int port) : IDisposable
             if (step.Phase is LandingPhase.Final or LandingPhase.Flare)
                 link.Run(_ => { if (!vessel.Control.Gear) vessel.Control.Gear = true; return 0; });
             _doing = step.Doing;
+            _approach = landing.Approach?.Name ?? "visual";
             if (landing.Approach is { } flying && flying.Name != said)
             {
                 said = flying.Name;
                 _clearance = Tower.Clearance(link.Wingman<string>("PlayerName"), flying);
             }
             return step.Target;
-        }, $"Landing on {runway.Name}: working out the approach.", landing);
+        }, $"Landing on {runway.Name}: working out the approach.", (link, vessel) => Rollout(link, vessel, landing));
     }
+
+    /// <summary>
+    /// Taxis off the runway after a landing (a tower's "vacate"): a right turn at walking pace, parked 90 m beside the
+    /// centerline with the brakes on. The plane stays in the game (no more recovering it to clear the runway).
+    /// </summary>
+    public void Vacate(Runway runway)
+    {
+        var started = DateTime.UtcNow;
+        var frame = new Landing(runway);
+        Start(_ => null, $"Taxiing off {runway.Name}.", (link, vessel) =>
+        {
+            var (g, f) = link.Run(_ => (vessel.Flight(vessel.Orbit.Body.ReferenceFrame), vessel.Flight(vessel.SurfaceReferenceFrame)));
+            var me = new Geo(link.Run(_ => g.Latitude), link.Run(_ => g.Longitude), link.Run(_ => g.MeanAltitude));
+            var (_, cross) = frame.RunwayFrame(link.Run(_ => vessel.Orbit.Body.EquatorialRadius), me);
+            var (speed, heading) = (link.Run(_ => g.Speed), link.Run(_ => f.Heading));
+            var (steer, throttle, brakes, done) = Taxi.Step(runway.Heading, heading, cross, speed);
+            var timedOut = DateTime.UtcNow - started > Taxi.MaxTime;
+            link.Run(_ =>
+            {
+                var c = vessel.Control;
+                c.WheelSteering = (float)(done || timedOut ? 0 : steer);
+                c.Throttle = (float)(done || timedOut ? 0 : throttle);
+                c.Brakes = brakes || done || timedOut;
+                return 0;
+            });
+            _doing = done || timedOut
+                ? string.Create(CultureInfo.InvariantCulture, $"Parked beside {runway.Name}, {Math.Abs(cross):0} m off the centerline, brakes on.")
+                : string.Create(CultureInfo.InvariantCulture, $"Taxiing off {runway.Name}: {Math.Abs(cross):0} m off the centerline, {speed:0.0} m/s.");
+            return (done && speed < 0.5) || timedOut;
+        });
+    }
+
+    /// <summary>The approach being flown ("visual", a published one, a tower's route), for the flight's outcome.</summary>
+    public string? Approach => _approach;
+
+    /// <summary>Where the last landing stopped, for the flight's outcome.</summary>
+    public LandingResult? LastLanding => _lastLanding;
+
+    private volatile string? _approach;
+    private volatile LandingResult? _lastLanding;
 
     private (DateTime Time, double Heading)? _rolloutLast;
 
@@ -126,7 +167,8 @@ public sealed class Director(string host, int port) : IDisposable
         _doing = "Not flying anything.";
     }
 
-    private void Start(Func<KrpcLink, PlaneTarget?> target, string doing, Landing? landing = null)
+    /// <param name="groundStep">On the ground: what to do (the rollout, a taxi); true once done. Null: the pilot only flies.</param>
+    private void Start(Func<KrpcLink, PlaneTarget?> target, string doing, Func<KrpcLink, Vessel, bool>? groundStep = null)
     {
         Stop();
         CancellationTokenSource stop;
@@ -142,7 +184,7 @@ public sealed class Director(string host, int port) : IDisposable
         {
             try
             {
-                await Fly(link, target, landing, stop.Token);
+                await Fly(link, target, groundStep, stop.Token);
                 lock (_gate)
                 {
                     if (_stop == stop)
@@ -164,7 +206,7 @@ public sealed class Director(string host, int port) : IDisposable
         });
     }
 
-    private async Task Fly(KrpcLink link, Func<KrpcLink, PlaneTarget?> target, Landing? landing, CancellationToken stop)
+    private async Task Fly(KrpcLink link, Func<KrpcLink, PlaneTarget?> target, Func<KrpcLink, Vessel, bool>? groundStep, CancellationToken stop)
     {
         var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
         var control = link.Run(_ => vessel.Control);
@@ -185,9 +227,9 @@ public sealed class Director(string host, int port) : IDisposable
                 link.Run(_ => { if (control.SAS) control.SAS = false; if (vessel.AutoPilot.Engaged) vessel.AutoPilot.Engaged = false; return 0; });
             }
             var situation = link.Run(_ => vessel.Situation);
-            if (situation == VesselSituation.Landed && landing != null)
+            if (situation == VesselSituation.Landed && groundStep != null)
             {
-                if (Rollout(link, vessel, landing))
+                if (groundStep(link, vessel))
                     return;
                 await Task.Delay(50, stop);
                 continue;
@@ -241,6 +283,8 @@ public sealed class Director(string host, int port) : IDisposable
         if (speed > 1)
             return false;
         link.Run(_ => { vessel.Control.Brakes = true; vessel.Control.WheelSteering = 0; return 0; });
+        _lastLanding = new LandingResult(landing.Runway.Name, Math.Round(step.Along + Landing.TouchdownAfterThreshold),
+            Math.Round(Math.Abs(step.Cross)), Math.Round(Math.Abs(headingError)));
         _doing = string.Create(CultureInfo.InvariantCulture,
             $"Landed on {landing.Runway.Name} and stopped, brakes on: {step.Along + Landing.TouchdownAfterThreshold:0} m down the runway, " +
             $"{Math.Abs(step.Cross):0} m off the centerline, pointing {Math.Abs(headingError):0}° off the runway heading. recover or take_off from here.");

@@ -11,7 +11,7 @@ using ModelContextProtocol.Server;
 namespace KspWingman.Mcp;
 
 [McpServerToolType]
-public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower)
+public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, FlightEvents events)
 {
     /// <summary>The longest wait_for_chat may wait (an MCP call shouldn't hang for minutes).</summary>
     internal const int MaxWaitSeconds = 120;
@@ -51,6 +51,16 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower)
             text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Time: {behind:0} s behind the player furthest ahead (other players may not see you)."));
         return text.ToString().TrimEnd();
     });
+
+    [McpServerTool(Name = "events"), Description(
+        "The agent's events after an id, oldest first, one JSON object a line: flight phases (taking off, on final, " +
+        "stopped...), each flight's outcome (landed and where, crashed), and the tower's messages. For a host app's " +
+        "screen more than for a model: give the last id seen (0 for all kept).")]
+    public string Events([Description("Only events after this id (0 for all kept).")] long afterId = 0)
+    {
+        var list = events.After(afterId);
+        return list.Count == 0 ? "" : string.Join("\n", list.Select(FlightEvents.ToJson));
+    }
 
     [McpServerTool(Name = "players"), Description(
         "The other players on the server: name, the vessel they fly, and LMP's status line for them (e.g. \"Flying above Kerbin\").")]

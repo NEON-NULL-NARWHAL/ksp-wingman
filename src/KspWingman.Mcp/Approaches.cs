@@ -68,6 +68,29 @@ public static class Tower
     }
 }
 
+/// <summary>Taxiing off the runway: a right turn at walking pace, parked beside the centerline.</summary>
+public static class Taxi
+{
+    /// <summary>Meters beside the centerline to park (a KSC runway half is ~35 m; this is well clear of it).</summary>
+    public const double ParkOffset = 90, Speed = 6;
+
+    public static readonly TimeSpan MaxTime = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// One step: wheel steering (KSP's sign: positive left), throttle, brakes, and whether it's far enough out. Heads
+    /// 90° right of the runway until clear, slower than a walk past 9 m/s.
+    /// </summary>
+    public static (double Steer, double Throttle, bool Brakes, bool Done) Step(double runwayHeading, double heading, double cross, double speed)
+    {
+        if (cross >= ParkOffset)
+            return (0, 0, true, true);
+        var error = Pilot.Wrap(runwayHeading + 90 - heading); // degrees to turn (positive: right)
+        var steer = Math.Clamp(-error / 30, -0.6, 0.6);
+        var throttle = Math.Clamp(0.12 * (Speed - speed), 0, 0.35);
+        return (steer, throttle, speed > Speed + 3, false);
+    }
+}
+
 /// <summary>A hold: right-hand circles around a point, at its altitude (a tower holds the second plane like this).</summary>
 public static class Holding
 {
