@@ -17,6 +17,11 @@ public sealed class LearningTests
         Assert.Equal(("land-rnav", "On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around."),
             Debrief.Parse("<think>hmm</think>SKILL: land-rnav | LESSON: On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around.", skills));
         Assert.Null(Debrief.Parse("NONE", skills));
+        // A note about this plane only: marked, and the marker isn't part of the lesson.
+        const string planeNote = "SKILL: takeoff | LESSON: Rotate the Gull at 50 m/s, it lifts early. | PLANE";
+        Assert.Equal("Rotate the Gull at 50 m/s, it lifts early.", Debrief.Parse(planeNote, skills)!.Value.Lesson);
+        Assert.True(Debrief.AboutPlane(planeNote));
+        Assert.False(Debrief.AboutPlane("SKILL: takeoff | LESSON: Rotate at 50 m/s."));
         // Skill names instead of ids (PlannerEval: qwen3:8b, gemma4:e4b), mapped only onto the flight's own skills.
         Assert.Equal("land-rnav", Debrief.Parse("SKILL: RNAV Landing | LESSON: Correct heading to within 2° before F09.", skills)?.Skill);
         Assert.Equal("land-rnav", Debrief.Parse("SKILL: Landing | LESSON: Correct lateral drift earlier to stop on the centerline.", skills)?.Skill);
@@ -146,6 +151,17 @@ public sealed class LearningTests
     }
 
     [Fact]
+    public async Task Training_on_new_planes_stops_when_there_are_none_instead_of_spinning()
+    {
+        var hub = new EventHub();
+        var tools = new FakeTools(hub); // launchable_craft answers "ok": no SPH line, no planes
+        var learner = new Learner(tools, new Planner("1"), hub, (_, _) => { }) { Settle = TimeSpan.Zero, Poll = TimeSpan.FromMilliseconds(10) };
+        var result = await learner.FreeFlyAsync(30, new FreeFlightLimits(), () => false, CancellationToken.None, ["new-craft"]);
+        Assert.StartsWith("Training stopped: no plane in the save's SPH", result);
+        Assert.True(tools.Calls.Count < 10);
+    }
+
+    [Fact]
     public async Task Out_of_the_box_the_plane_is_sent_back_to_land()
     {
         var hub = new EventHub();
@@ -155,6 +171,20 @@ public sealed class LearningTests
         await learner.FreeFlyAsync(30, new FreeFlightLimits(), () => tools.Calls.Count(c => c == "take_off") >= 2, CancellationToken.None);
         Assert.Contains(said, s => s.Contains("Outside the box (29 km out", StringComparison.Ordinal));
         Assert.Contains("land", tools.Calls); // the plain land (back to the runway), after land:RNAV 09 NORTH
+    }
+
+    [Fact]
+    public void A_takeoff_that_starts_badly_is_rejected_and_runway_in_sight_waits_for_lined_up()
+    {
+        Assert.Null(TakeoffCheck.Reject(TimeSpan.FromSeconds(10), 25, 3, 55)); // a normal roll
+        Assert.Contains("veering 20°", TakeoffCheck.Reject(TimeSpan.FromSeconds(8), 30, -20, 55));
+        Assert.Null(TakeoffCheck.Reject(TimeSpan.FromSeconds(1), 2, 40, 55)); // swinging at walking pace isn't veering yet
+        Assert.Contains("not accelerating", TakeoffCheck.Reject(TimeSpan.FromSeconds(31), 20, 0, 55));
+        Assert.Contains("out of runway", TakeoffCheck.Reject(TimeSpan.FromSeconds(46), 50, 0, 55));
+
+        Assert.True(TowerClient.LinedUp("Landing, on final: 6.4 km before the touchdown point, 193 m left of the centerline, 87 m/s."));
+        Assert.False(TowerClient.LinedUp("Landing, on final: 6.4 km before the touchdown point, 900 m left of the centerline, 87 m/s."));
+        Assert.False(TowerClient.LinedUp("Landing, on final: 12.0 km before the touchdown point, 20 m left of the centerline, 87 m/s."));
     }
 
     [Fact]

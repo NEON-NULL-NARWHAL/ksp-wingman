@@ -91,6 +91,24 @@ public static class Taxi
     }
 }
 
+/// <summary>When a takeoff roll is going badly enough to stop it (a rejected takeoff), and why.</summary>
+public static class TakeoffCheck
+{
+    /// <summary>Degrees off the runway heading that mean it's veering off; seconds by which it must be halfway, and up to speed.</summary>
+    public const double MaxHeadingError = 12, HalfSpeedBy = 30, FullSpeedBy = 45;
+
+    public static string? Reject(TimeSpan rolling, double speed, double headingError, double rotateSpeed)
+    {
+        if (Math.Abs(headingError) > MaxHeadingError && speed > 5)
+            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"veering {Math.Abs(headingError):0}° off the runway heading");
+        if (rolling.TotalSeconds > HalfSpeedBy && speed < rotateSpeed / 2)
+            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"only {speed:0} m/s after {HalfSpeedBy:0} s (not accelerating)");
+        if (rolling.TotalSeconds > FullSpeedBy && speed < rotateSpeed)
+            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"not up to {rotateSpeed:0} m/s after {FullSpeedBy:0} s (out of runway)");
+        return null;
+    }
+}
+
 /// <summary>A hold: right-hand circles around a point, at its altitude (a tower holds the second plane like this).</summary>
 public static class Holding
 {

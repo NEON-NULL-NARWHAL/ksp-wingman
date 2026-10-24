@@ -211,7 +211,7 @@ static async Task ForwardEvents(McpTools tools, EventHub hub, Action<System.Text
                 Ui.Line(kind == "outcome" ? "flight" : kind, said, e["data"]);
                 hub.Add(kind, said, e["data"]);
                 if (kind == "outcome")
-                    lastOutcome = said;
+                    lastOutcome = said + (e["data"]?["craft"] is System.Text.Json.Nodes.JsonValue c && c.TryGetValue<string>(out var craft) ? $" (in the {craft})" : "");
                 else if (kind == "knowledge")
                     recorded(e["data"], lastOutcome);
             }

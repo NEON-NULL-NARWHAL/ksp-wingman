@@ -73,8 +73,12 @@ public static partial class Debrief
         "with a verb (e.g. \"Slow to 85 m/s before F09 to stop closer to the centerline.\"), 10 to 200 characters, with " +
         "numbers from the record when you can. Don't just repeat what happened, and don't repeat a lesson that's already " +
         "there. SKILL is one of these ids, exactly: " + string.Join(", ", skills.Keys) + ". Answer exactly:\n" +
-        "SKILL: <skill id> | LESSON: <sentence>\nIf the flight taught nothing new, answer NONE." +
+        "SKILL: <skill id> | LESSON: <sentence>\nIf the lesson is about this plane only (how it handles, its speeds, how it " +
+        "differs from other planes), end the line with | PLANE. If the flight taught nothing new, answer NONE." +
         (skills.Values.All(good => good) ? " Every grade is good: answer NONE unless the record shows something clearly worth improving." : "");
+
+    /// <summary>Whether the lesson is about the flight's plane only (the answer's line ends "| PLANE").</summary>
+    public static bool AboutPlane(string answer) => answer.Contains("| PLANE", StringComparison.OrdinalIgnoreCase) || answer.Contains("|PLANE", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The planner's answer as (skill, lesson), when it's one of the flight's skills and a sane sentence.</summary>
     public static (string Skill, string Lesson)? Parse(string answer, IReadOnlyCollection<string> skills)
@@ -83,7 +87,7 @@ public static partial class Debrief
         if (!m.Success)
             return null;
         var skill = Skill(m.Groups[1].Value, skills);
-        var lesson = m.Groups[2].Value.Trim().Trim('"');
+        var lesson = Regex.Replace(m.Groups[2].Value, @"\s*\|\s*PLANE\s*$", "", RegexOptions.IgnoreCase).Trim().Trim('"');
         if (skill == null || lesson.Length is < 10 or > 200 || lesson.Contains('\n'))
             return null;
         // Advice, not a report: the rig's first "lesson" was "Landed 25m off centerline at 1021m down runway 09".

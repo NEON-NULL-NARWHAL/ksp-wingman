@@ -31,6 +31,8 @@ public sealed class TowerClient : IDisposable
     private string? _callSign;
     private bool _wantsToLand;
     private bool _calledSight;
+    private bool _calledGoAround;
+    private Approach? _pending; // a clearance that came in during a go-around's climb-out
 
     private readonly FlightEvents? _events;
 
@@ -102,6 +104,18 @@ public sealed class TowerClient : IDisposable
             };
         });
         await Handle(await PostAsync("v1/report", report));
+        // Going around: tell the tower, once; it resequences (a hold with traffic, or the short visual at once). A new
+        // route waits until the climb-out is through 300 m, so it never turns onto it just off the ground.
+        if (!_calledGoAround && _director.Doing.Contains("oing around", StringComparison.Ordinal))
+        {
+            _calledGoAround = true;
+            await SayAsync("go-around", "going around");
+        }
+        if (_pending is { } waiting && _link.Run(c => c.SpaceCenter().ActiveVessel is var v && v.Flight(v.Orbit.Body.ReferenceFrame).SurfaceAltitude > 300))
+        {
+            _pending = null;
+            _director.Land(Runway.Ksc, waiting);
+        }
         // On final and lined up: "runway in sight", once an approach; the tower answers with the landing clearance.
         if (!_calledSight && _director.Doing.StartsWith("Landing, on final", StringComparison.Ordinal) && LinedUp(_director.Doing))
         {
@@ -164,10 +178,13 @@ public sealed class TowerClient : IDisposable
     }
 
     /// <summary>Adds a lesson citing one of this agent's flights. Returns what the tower said.</summary>
-    public async Task<string> LearnAsync(string skill, string text, long flightId)
+    public async Task<string> LearnAsync(string skill, string text, long flightId, bool aboutPlane = false)
     {
         _callSign ??= _link.Wingman<string>("PlayerName");
-        var answer = await PostRawAsync("v1/lesson", new JsonObject { ["callSign"] = _callSign, ["skill"] = skill, ["text"] = text, ["evidence"] = new JsonArray(flightId) });
+        var answer = await PostRawAsync("v1/lesson", new JsonObject
+        {
+            ["callSign"] = _callSign, ["skill"] = skill, ["text"] = text, ["evidence"] = new JsonArray(flightId), ["aboutCraft"] = aboutPlane,
+        });
         if (answer?["lesson"] is JsonObject lesson)
         {
             var confirmations = lesson["confirmations"] is JsonValue c && c.TryGetValue<int>(out var n) ? n : 0;
@@ -214,9 +231,14 @@ public sealed class TowerClient : IDisposable
                     break;
                 case "clearance" when Route(m["route"]) is { } approach:
                     _calledSight = false;
-                    _director.Land(Runway.Ksc, approach);
+                    _calledGoAround = false;
+                    if (_director.Doing.StartsWith("Going around: climbing out", StringComparison.Ordinal))
+                        _pending = approach; // flown once it's through 300 m
+                    else
+                        _director.Land(Runway.Ksc, approach);
                     break;
                 case "hold" when Hold(m["hold"]) is { } hold:
+                    _calledGoAround = false;
                     _director.HoldAt(hold.Center, hold.Radius, hold.Fix);
                     break;
                 case "clearance" or "hold":

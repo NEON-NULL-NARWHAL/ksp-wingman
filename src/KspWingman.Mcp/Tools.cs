@@ -123,13 +123,14 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
     public string Learn(
         [Description("The skill: takeoff, route, hold, land-visual, land-rnav or sequencing.")] string skill,
         [Description("The lesson, e.g. \"On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around.\"")] string lesson,
-        [Description("The id of your flight that showed it.")] long flightId)
+        [Description("The id of your flight that showed it.")] long flightId,
+        [Description("True when the lesson is about that flight's plane only (its handling, speeds, how it compares with others).")] bool aboutPlane = false)
     {
         if (tower.Client is not { } client)
             return "No tower: lessons are kept by LUNA EVO Mission Control's KSC tower (WINGMAN_TOWER_URL).";
         try
         {
-            return client.LearnAsync(skill.Trim(), lesson.Trim(), flightId).GetAwaiter().GetResult();
+            return client.LearnAsync(skill.Trim(), lesson.Trim(), flightId, aboutPlane).GetAwaiter().GetResult();
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
@@ -153,6 +154,20 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
                             $"{Int(s["all"]?["good"])} of {Int(s["all"]?["attempts"])}{(open ? "" : " · locked: practise " + string.Join(", ", (s["requires"] as System.Text.Json.Nodes.JsonArray ?? []).Select(Str)) + " first")}");
             foreach (var l in (s["lessons"] as System.Text.Json.Nodes.JsonArray ?? []).OfType<System.Text.Json.Nodes.JsonObject>())
                 text.AppendLine($"   - {Str(l["text"])} ({Int(l["flights"])} flight(s))");
+        }
+        // Each plane flown on the server (the owner's idea): what it's done, its notes, and what's still to learn about it.
+        if (answer["crafts"] is System.Text.Json.Nodes.JsonArray crafts && crafts.Count > 0)
+        {
+            static double Num(System.Text.Json.Nodes.JsonNode? n) => n is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<double>(out var d) ? d : 0;
+            text.AppendLine("Planes (what the server's agents know about each):");
+            foreach (var c in crafts.OfType<System.Text.Json.Nodes.JsonObject>())
+            {
+                text.AppendLine(string.Create(CultureInfo.InvariantCulture,
+                    $"- {Str(c["name"])}: {Int(c["flights"])} flight(s), {Int(c["landed"])} landed, {Int(c["crashed"])} crashed, fastest {Num(c["topSpeed"]):0} m/s, highest {Num(c["topHeight"]):0} m") +
+                    ((c["toLearn"] as System.Text.Json.Nodes.JsonArray) is { Count: > 0 } open ? "; still to learn: " + string.Join(", ", open.Select(Str)) : ""));
+                foreach (var n in (c["notes"] as System.Text.Json.Nodes.JsonArray ?? []).Select(Str))
+                    text.AppendLine($"   - {n}");
+            }
         }
         if (answer["flights"] is System.Text.Json.Nodes.JsonArray flights && flights.Count > 0)
             text.Append("Your last flights: " + string.Join("; ", flights.OfType<System.Text.Json.Nodes.JsonObject>().Select(f => $"#{Int(f["id"])} {Str(f["result"])} {Str(f["approach"])}".TrimEnd())));

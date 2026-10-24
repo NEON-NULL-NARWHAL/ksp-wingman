@@ -302,6 +302,21 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
             {
                 // Steer the nose wheel back onto the heading: a few degrees off is a gentle push, never full lock.
                 var error = ((runway - actual + 540) % 360) - 180;
+                // A takeoff that starts badly is stopped on the runway (the owner's idea): veering, or too slow.
+                if (TakeoffCheck.Reject(DateTime.UtcNow - start, rollSpeed, error, rotateSpeed) is { } why)
+                {
+                    krpc.Run(_ =>
+                    {
+                        control.Throttle = 0;
+                        control.WheelSteering = 0;
+                        control.Brakes = true;
+                        return 0;
+                    });
+                    var stop = DateTime.UtcNow;
+                    while (krpc.Run(_ => vessel.Flight(ground).Speed) > 1 && DateTime.UtcNow - stop < TimeSpan.FromSeconds(40))
+                        await Task.Delay(250, cancel);
+                    return $"Takeoff rejected: {why}. Stopped on the runway, brakes on; recover and launch again to try again.";
+                }
                 krpc.Run(_ => control.WheelSteering = (float)Math.Clamp(-error / 10, -0.5, 0.5));
                 if (rollSpeed >= rotateSpeed)
                 {

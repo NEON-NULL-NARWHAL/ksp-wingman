@@ -43,8 +43,12 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 : "Debrief: no usable lesson in the planner's answer (\"" + OneLine(answer) + "\").");
             return false;
         }
-        var saved = await tools.CallAsync("learn", new Dictionary<string, object?> { ["skill"] = lesson.Skill, ["lesson"] = lesson.Lesson, ["flightId"] = flightId }, cancel);
-        say("debrief", $"Debrief ({lesson.Skill}): {lesson.Lesson} → {saved}");
+        var aboutPlane = Debrief.AboutPlane(answer);
+        var saved = await tools.CallAsync("learn", new Dictionary<string, object?>
+        {
+            ["skill"] = lesson.Skill, ["lesson"] = lesson.Lesson, ["flightId"] = flightId, ["aboutPlane"] = aboutPlane,
+        }, cancel);
+        say("debrief", $"Debrief ({lesson.Skill}{(aboutPlane ? ", about this plane" : "")}): {lesson.Lesson} → {saved}");
         return !saved.StartsWith("The tower refused", StringComparison.Ordinal) && !saved.StartsWith("No tower", StringComparison.Ordinal);
     }
 
@@ -58,15 +62,20 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
         IReadOnlyList<string>? focus = null)
     {
         var tried = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rejected = 0; // rejected takeoffs in a row
+        var exhausted = new HashSet<Goal>(); // goals that can't be flown this session (no new plane left)
+        var idle = 0; // rounds in a row without a flight: never spin (the rig once looped on "no new plane" thousands of times)
         var until = DateTime.UtcNow.AddMinutes(Math.Clamp(minutes, 5, 240));
         var history = new List<(Goal Goal, bool Good, bool Lesson)>();
         var crashes = 0;
         var craft = "Aeris 3A";
         while (DateTime.UtcNow < until && !interrupted() && !cancel.IsCancellationRequested)
         {
+            if (++idle > 5)
+                return "Free flight stopped: five rounds in a row without a flight.";
             var knowledge = await tools.CallAsync("knowledge", None, cancel);
             var proficiency = FreeFlight.Proficiency(knowledge);
-            var menu = FreeFlight.Menu(history, focus);
+            var menu = FreeFlight.Menu(history, focus).Where(g => !exhausted.Contains(g)).ToList();
             if (menu.Count == 0)
                 return "Free flight stopped: every goal failed twice in a row without a lesson.";
             string answer;
@@ -94,8 +103,12 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 var next = FreeFlight.Planes(await tools.CallAsync("launchable_craft", None, cancel)).FirstOrDefault(p => !tried.Contains(p));
                 if (next == null)
                 {
-                    say("free", "No plane left in the SPH that it hasn't flown.");
-                    history.Add((goal, false, true)); // off the menu for a while, not a failure to learn from
+                    var planes = FreeFlight.Planes(await tools.CallAsync("launchable_craft", None, cancel));
+                    var noPlane = $"no plane in the save's SPH that it hasn't flown (it has: {string.Join(", ", planes)}). Put more planes in the save's Ships/SPH folder.";
+                    if (focus != null)
+                        return "Training stopped: " + noPlane;
+                    say("free", "Skipping new planes: " + noPlane);
+                    exhausted.Add(goal); // off the menu for the rest of the session
                     continue;
                 }
                 launchCraft = next;
@@ -113,6 +126,14 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                     return "Free flight stopped: " + launched.Split('\n')[0].Trim();
                 await Task.Delay(Settle, cancel);
                 var off = await Call("take_off", new Dictionary<string, object?> { ["heading"] = 90.0, ["altitude"] = 900.0 }, cancel);
+                if (off.StartsWith("Takeoff rejected", StringComparison.Ordinal) && ++rejected < 2)
+                {
+                    // A rejected takeoff is a failed attempt, not the end of practice: recover, and next time again.
+                    say("free", off.Split('\n')[0].Trim());
+                    history.Add((goal, false, false));
+                    await Call("recover", None, cancel);
+                    continue;
+                }
                 if (!off.StartsWith("Airborne", StringComparison.Ordinal))
                 {
                     if (goal.Approach != "craft")
@@ -121,7 +142,9 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                     history.Add((goal, false, false));
                     continue; // another plane next time
                 }
+                rejected = 0;
             }
+            idle = 0; // it's flying
             var mark = hub.Last;
             var ceiling = limits.CeilingM;
             if (goal.Approach == "fast")
@@ -171,7 +194,8 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 recorded = hub.After(o.Id, "knowledge");
             }
             var good = recorded?.Data?["skills"]?[goal.Skill] is JsonValue g && g.TryGetValue<bool>(out var gb) && gb;
-            var learned = recorded != null && await DebriefAsync(recorded.Value.Data, o.Text, cancel);
+            var flownIn = o.Data?["craft"] is JsonValue cv && cv.TryGetValue<string>(out var cs) ? cs : launchCraft;
+            var learned = recorded != null && await DebriefAsync(recorded.Value.Data, $"{o.Text} (in the {flownIn})", cancel);
             history.Add((goal, good, learned));
             // Training: done once the focus has gone well enough times in a row.
             if (focus != null)

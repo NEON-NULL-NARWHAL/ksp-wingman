@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.0 (2026-10-24): rejected takeoffs and go-arounds
+
+### Added
+- **Rejected takeoff** (the owner's idea): a takeoff roll veering more than 12° off the runway, under half its rotate
+  speed after 30 s, or not up to it after 45 s is stopped (throttle off, brakes on), and take_off says why; free flight
+  counts it as a failed attempt and tries again (two in a row stop it).
+- **Go-arounds reported**: going around, the agent tells LUNA EVO's tower (Mission Control 2.16), which resequences
+  it; a clearance that arrives during the climb-out is flown from 300 m above the ground.
+
+- **Notes about planes**: the debrief can mark a lesson as being about the flight's plane only (`| PLANE`): how it
+  handles, its speeds, how it differs; `learn` takes `aboutPlane`, and `knowledge` shows each plane's profile and what's
+  still to learn about it (LUNA EVO's tower keeps them).
+
+### Fixed (found in the rig)
+- Training on new planes with no plane left in the save's SPH spun without pause: it stops with the reason (and says
+  to put planes in the save's Ships/SPH); free flight stops after five rounds without a flight.
+
 ## 0.9.0 (2026-10-24): training and flight plans
 
 ### Added
