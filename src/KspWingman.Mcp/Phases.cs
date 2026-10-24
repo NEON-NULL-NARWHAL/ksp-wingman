@@ -34,7 +34,10 @@ public readonly record struct PhaseChange(Phase From, Phase To, FlightOutcome? O
 /// How a flight ended: landed (and where), crashed, splashed down, or ended otherwise (recovered or the scene left in the
 /// air). The numbers come from the pilot's landing when there was one.
 /// </summary>
-public sealed record FlightOutcome(string Result, double Minutes, int GoArounds, string? Approach, LandingResult? Landing);
+/// <param name="Phases">The phases it went through, in order (the knowledge store grades skills from them).</param>
+/// <param name="Craft">The vessel's name.</param>
+public sealed record FlightOutcome(string Result, double Minutes, int GoArounds, string? Approach, LandingResult? Landing,
+    IReadOnlyList<string>? Phases = null, string? Craft = null);
 
 /// <summary>Where a landing stopped: meters down the runway from the threshold, off the centerline, and the heading error.</summary>
 public sealed record LandingResult(string Runway, double DownRunway, double OffCenterline, double HeadingError);
@@ -46,6 +49,7 @@ public sealed class PhaseTracker
     private bool _landedThisFlight;
     private int _goArounds;
     private bool _inGoAround;
+    private readonly List<Phase> _visited = [];
 
     public Phase Phase => _phase;
 
@@ -67,6 +71,8 @@ public sealed class PhaseTracker
 
         var from = _phase;
         _phase = next;
+        if (_visited.Count == 0 || _visited[^1] != next)
+            _visited.Add(next);
         if (Airborne(next) && _flightStarted == null)
         {
             _flightStarted = now;
@@ -91,13 +97,17 @@ public sealed class PhaseTracker
             };
             if (result != null)
             {
-                outcome = new FlightOutcome(result, Math.Round(minutes, 1), _goArounds, approach, result == "landed" ? landing : null);
+                outcome = new FlightOutcome(result, Math.Round(minutes, 1), _goArounds, approach, result == "landed" ? landing : null,
+                    _visited.Select(p => p.ToString()).ToList());
+                _visited.Clear();
                 _flightStarted = null;
                 _landedThisFlight = false; // a takeoff from here is a new flight
             }
             else if (next == Phase.NotFlying)
                 _flightStarted = null; // after a landing (recovered from the runway): already reported
         }
+        if (next == Phase.NotFlying)
+            _visited.Clear(); // the next flight starts afresh
         return new PhaseChange(from, next, outcome);
     }
 
@@ -117,8 +127,10 @@ public sealed class PhaseTracker
         {
             if (s.Pilot.StartsWith("Taxiing", StringComparison.Ordinal))
                 return Phase.Taxiing;
-            // Parked after taxiing, even while the brakes still bite (the rig: 8.7 m/s to 0 in two seconds).
-            if (s.Pilot.StartsWith("Parked beside", StringComparison.Ordinal) || _phase == Phase.Taxiing)
+            // Parked after taxiing, even while the brakes still bite (the rig: 8.7 m/s to 0 in two seconds). Only right
+            // after the taxi: the words stay in the pilot's line after a recovery, and held a new plane's whole takeoff
+            // roll at Stopped in the rig.
+            if (_phase == Phase.Taxiing)
                 return Phase.Stopped;
             // Stopped, unless rolling: more than 3 m/s to start (a plane settling after it spawns wobbles), under 1 to stop.
             if (s.Speed < (_phase is Phase.Parked or Phase.Stopped ? 3 : 1))
@@ -134,7 +146,9 @@ public sealed class PhaseTracker
             return Phase.OnFinal;
         if (p.StartsWith("Holding at", StringComparison.Ordinal))
             return Phase.Holding;
-        if (p.StartsWith("Flying RNAV", StringComparison.Ordinal) || p.StartsWith("Flying to the final", StringComparison.Ordinal) ||
+        // Any of the tower's routes ("Flying RNAV 09 SOUTH: ...", "Flying VISUAL 09: ..."; the rig's visual was graded without its route).
+        if (p.StartsWith("Flying RNAV", StringComparison.Ordinal) || p.StartsWith("Flying VISUAL", StringComparison.Ordinal) ||
+            p.StartsWith("Flying the tower", StringComparison.Ordinal) || p.StartsWith("Flying to the final", StringComparison.Ordinal) ||
             p.StartsWith("Going around", StringComparison.Ordinal) || p.StartsWith("Landing, going around", StringComparison.Ordinal))
             return Phase.OnRoute;
         if (s.VerticalSpeed > 3)

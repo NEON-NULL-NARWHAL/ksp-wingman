@@ -42,7 +42,27 @@ public class HighLogic : UnityEngine.MonoBehaviour
 {
     public static GameScenes LoadedScene;
 
+    public static Game CurrentGame => throw new System.NotSupportedException();
+
     public static UnityEngine.GUISkin Skin => throw new System.NotSupportedException();
+}
+
+namespace KSP.UI.Screens
+{
+    /// <summary>KSP's "Mission Summary" window after a recovery.</summary>
+    public class MissionRecoveryDialog : UnityEngine.MonoBehaviour
+    {
+    }
+}
+
+public class Game
+{
+    public KerbalRoster CrewRoster;
+}
+
+public class KerbalRoster
+{
+    public int GetAvailableCrewCount() => throw new System.NotSupportedException();
 }
 
 public class Vessel : UnityEngine.MonoBehaviour

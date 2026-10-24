@@ -80,6 +80,8 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 | `approaches` | The published approaches and their fixes, with the height and speed to cross each at (see [the tower](#the-tower-and-its-approaches)). |
 | `stop_following` | Holds the current heading, height and speed. |
 | `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
+| `knowledge` | What the server's agents know (LUNA EVO's tower, 0.7): the skills (take off, fly a route, hold, land visual, land RNAV, land in sequence), how many of your flights and everyone's went well, which are open to practise, the lessons earlier flights taught (facts, not orders), and your last flights. |
+| `learn` | Saves a lesson for every agent on the server, citing one of your flights that showed it (refused without one). The console's debrief uses it; the model doesn't get it. |
 | `events` | What happened since an event number, as JSON lines: flight phases (parked, taking off, climbing, cruising, on a route, holding, on final, flaring, rolling out, stopped, taxiing, crashed...), each flight's outcome (landed and where on the runway, crashed, splashed, go-arounds, the approach flown) and the tower's messages. For apps watching agents; the console shows them too. |
 
 ### The tower and its approaches
@@ -99,6 +101,9 @@ agent reports to it every few seconds, answers "say intentions", and `land` asks
 the whole route, the next holds (circling a hold point, stacked 300 m apart) until the first has landed and vacated
 the runway. Told to vacate (0.6), the agent taxis off to the right at walking pace and parks 90 m beside the runway,
 brakes on; the tower clears the next plane as soon as it's off. The tower's last message shows in status.
+Close in with nobody else waiting, the tower (Mission Control 2.13) clears the **short visual** instead of an RNAV
+route: the RNAV pattern made smaller (downwind 3 km to the side, the base turn 7 km out, a 4.5 km final), about 16 km flown instead of 25. `land` with an approach's
+name asks the tower for it; it's granted when nobody else is waiting.
 
 ![LUNA EVO Mission Control's KSC tower page: two agents on the channel, one cleared for RNAV 09 SOUTH, the other holding as number 2](docs/tower.png)
 
@@ -143,17 +148,28 @@ back where the order came from, as one chat line. Without `--allow`, chat orders
 | `--call-sign` | What players call the agent in chat. | `Wingman` |
 | `--mcp` | Path to `KspWingman.Mcp.exe`. | next to `KspWingman.exe` |
 | `--think` | Let a thinking model think (slow: 20+ s per answer). | off |
+| `--planner-model` | A model that thinks, for free flight's choices and the debriefs (it never flies). With Ollama it thinks through Ollama's own API. | the pilot's model |
+| `--planner-llm` | The planner's server. | the pilot's |
 | `--ipc` | For an app running the console (LUNA EVO Mission Control's Wingman page): one JSON object a line in and out, see below. | off |
 
 The same settings can come from the environment: `WINGMAN_MODEL`, `WINGMAN_LLM_URL`, `WINGMAN_LLM_KEY`,
 `WINGMAN_KRPC_HOST`, `WINGMAN_KRPC_PORT`. `WINGMAN_EVENTS_LOG=<file>` (for the MCP server) also writes every event
 to a file, one JSON line each.
 
+**Free flight and learning (0.7).** `/free 30` (or `{"type":"free","minutes":30}`) lets the agent practise on its own
+for 30 minutes: the planner picks a goal from a numbered menu (land on RNAV 09 NORTH, SOUTH, STRAIGHT-IN, or the
+short visual), preferring its weakest skill, and code flies it: a new plane if needed, take off, land on that approach.
+Code keeps it in the box (25 km around KSC, below 3,000 m: outside, it's sent back to land), stops after two crashes in
+a row, drops a goal that failed twice without a lesson, and any order stops free flight. With LUNA EVO's tower, each
+finished flight is graded on the server, and the **debrief** follows: the planner reads the flight's record and writes
+one lesson ("On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around"), which code checks and saves citing the
+flight. Every agent on the server then sees it in `knowledge`. Debriefs also follow ordinary flights.
+
 **`--ipc`:** the console reads `{"type":"order","text":"land at KSC","from":"Commander"}`, `{"type":"status"}`,
-`{"type":"forget"}` or `{"type":"quit"}` (quits without asking), one a line (plain text is an order), and writes
+`{"type":"forget"}`, `{"type":"free","minutes":30}`, `{"type":"stop-free"}` or `{"type":"quit"}` (quits without asking), one a line (plain text is an order), and writes
 everything as `{"type":"event","time":...,"kind":...,"text":...,"data":...}`: kinds `order`, `chat`, `call`, `result`,
-`answer`, `status`, `error`, `wingman`, and every 2 s the MCP server's events: `phase`, `flight` (an outcome) and
-`tower`. [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control) 2.12 installs
+`answer`, `status`, `error`, `wingman`, `free`, `debrief`, and every 2 s the MCP server's events: `phase`, `flight` (an
+outcome), `tower`, `knowledge` (the flight's grades) and `lesson`. [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control) 2.12 installs
 Wingman, its mod and a model, and runs agents this way (rail: Play → Wingman).
 
 **In the console:** `/status` (where the agent is), `/forget` (clears the conversation), `/quit`. While the pilot is

@@ -1,7 +1,8 @@
 // KSP Wingman · src/KspWingman.Mcp/TowerClient.cs
 // The agent's side of LUNA EVO Mission Control's KSC tower (WINGMAN_TOWER_URL): reports where the plane is every few
 // seconds, answers the tower's "say intentions", and flies what it's told: a cleared route, a hold, vacating the
-// runway after landing. The tower's messages are kept for status.
+// runway after landing. The tower's messages are kept for status. Each finished flight goes to the tower's knowledge
+// store (Mission Control 2.13+), and the knowledge and learn tools read and add to it.
 
 using System.Globalization;
 using System.Net.Http.Json;
@@ -35,6 +36,12 @@ public sealed class TowerClient : IDisposable
     public TowerClient(Uri tower, string host, int port, Director director, FlightEvents? events = null)
     {
         _events = events;
+        if (events != null)
+            events.Added += e =>
+            {
+                if (e.Kind == "outcome" && e.Data is FlightOutcome o)
+                    _ = RecordFlightAsync(o);
+            };
         _tower = tower;
         _link = new KrpcLink(host, port);
         _director = director;
@@ -45,10 +52,11 @@ public sealed class TowerClient : IDisposable
     public IReadOnlyList<string> Heard { get { lock (_heard) return _heard.ToList(); } }
 
     /// <summary>Asks for an approach. The answer (a clearance or a hold) comes back and is acted on.</summary>
-    public async Task<string> RequestApproachAsync()
+    /// <param name="approach">One to ask for ("RNAV 09 NORTH", "visual"): granted when nobody else is waiting.</param>
+    public async Task<string> RequestApproachAsync(string? approach = null)
     {
         _wantsToLand = true;
-        var answers = await SayAsync("request-approach", "request approach, KSC runway 09");
+        var answers = await SayAsync("request-approach", approach is { Length: > 0 } a ? "request " + a : "request approach, KSC runway 09");
         return answers.Count == 0 ? "Asked KSC tower for an approach; its answer will show in status." : string.Join(" ", answers);
     }
 
@@ -99,6 +107,58 @@ public sealed class TowerClient : IDisposable
     {
         _callSign ??= _link.Wingman<string>("PlayerName");
         return await Handle(await PostAsync("v1/say", new JsonObject { ["callSign"] = _callSign, ["kind"] = kind, ["text"] = text }));
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions Web = new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>A finished flight to the knowledge store; its grades come back as a "knowledge" event.</summary>
+    private async Task RecordFlightAsync(FlightOutcome outcome)
+    {
+        try
+        {
+            _callSign ??= _link.Wingman<string>("PlayerName");
+            var body = (JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(outcome, Web)!;
+            body["callSign"] = _callSign;
+            var answer = await PostRawAsync("v1/flight", body);
+            if (answer?["flight"] is not JsonObject flight || flight["id"] is not JsonValue idValue || !idValue.TryGetValue<long>(out var id))
+                return; // an older tower without knowledge
+            var grades = flight["skills"] as JsonObject ?? [];
+            var text = $"Flight {id} recorded: " + (grades.Count == 0 ? "no skills used." :
+                string.Join(", ", grades.Select(g => $"{g.Key} {(g.Value is JsonValue v && v.TryGetValue<bool>(out var good) && good ? "good" : "not good yet")}")) + ".");
+            _events?.Add("knowledge", text, new { flightId = id, skills = grades.ToDictionary(g => g.Key, g => g.Value is JsonValue v && v.TryGetValue<bool>(out var b) && b) });
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or WingmanException or System.Text.Json.JsonException or IOException or System.InvalidOperationException)
+        {
+            // No tower: the flight stays in the events only.
+        }
+    }
+
+    /// <summary>The knowledge store's skills (with this agent's and everyone's numbers), lessons and last flights.</summary>
+    public async Task<JsonNode?> KnowledgeAsync()
+    {
+        _callSign ??= _link.Wingman<string>("PlayerName");
+        return await PostRawAsync("v1/knowledge", new JsonObject { ["callSign"] = _callSign });
+    }
+
+    /// <summary>Adds a lesson citing one of this agent's flights. Returns what the tower said.</summary>
+    public async Task<string> LearnAsync(string skill, string text, long flightId)
+    {
+        _callSign ??= _link.Wingman<string>("PlayerName");
+        var answer = await PostRawAsync("v1/lesson", new JsonObject { ["callSign"] = _callSign, ["skill"] = skill, ["text"] = text, ["evidence"] = new JsonArray(flightId) });
+        if (answer?["lesson"] is JsonObject lesson)
+        {
+            var confirmations = lesson["confirmations"] is JsonValue c && c.TryGetValue<int>(out var n) ? n : 0;
+            _events?.Add("lesson", $"Learned ({skill}): {text}", new { skill, text, flightId });
+            return confirmations > 0 ? $"That confirms a lesson the server already had ({confirmations} confirmation(s))." : "Lesson saved on the server.";
+        }
+        return "The tower refused the lesson: " + (answer?["error"] is JsonValue e && e.TryGetValue<string>(out var why) ? why : "no answer");
+    }
+
+    private async Task<JsonNode?> PostRawAsync(string path, JsonObject body)
+    {
+        using var response = await _http.PostAsJsonAsync(new Uri(_tower, path), body);
+        var text = await response.Content.ReadAsStringAsync();
+        return text.Length is 0 or > 1_000_000 ? null : JsonNode.Parse(text);
     }
 
     private async Task<JsonArray> PostAsync(string path, JsonObject body)
@@ -176,7 +236,8 @@ public sealed class TowerClient : IDisposable
     }
 
     /// <summary>Fixes the agent flies for a tower: within this of KSC (m), these heights (m) and speeds (m/s), this many.</summary>
-    public const double MaxDistance = 60_000, MinAltitude = 400, MaxAltitude = 5000, MinSpeed = 60, MaxSpeed = 250;
+    // 300 m: the short visual's final fix is at 384 m (4.5 km out on the 4° slope). Audit 15.
+    public const double MaxDistance = 60_000, MinAltitude = 300, MaxAltitude = 5000, MinSpeed = 60, MaxSpeed = 250;
     public const int MaxFixes = 12;
 
     private static bool NearKsc(double lat, double lon)

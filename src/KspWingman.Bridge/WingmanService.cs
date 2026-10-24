@@ -36,6 +36,29 @@ namespace KspWingman.Bridge
         [KRPCProcedure]
         public static string PlayerName() => SettingsSystem.CurrentSettings.PlayerName ?? "";
 
+        /// <summary>
+        /// Kerbals free to fly a new vessel, or -1 without a game. With none, KSP's launch stops on a "No Control!" dialog
+        /// that kRPC can't answer (seen in the rig: the crew were all in planes parked beside the runway).
+        /// </summary>
+        [KRPCProcedure]
+        public static int AvailableCrew() => HighLogic.CurrentGame?.CrewRoster?.GetAvailableCrewCount() ?? -1;
+
+        /// <summary>
+        /// Closes KSP's "Mission Summary" window (shown after a recovery), which nobody can click from kRPC; with it open,
+        /// the next launch waited forever in the rig. Returns how many it closed.
+        /// </summary>
+        [KRPCProcedure]
+        public static int CloseDialogs()
+        {
+            var closed = 0;
+            foreach (var dialog in UnityEngine.Object.FindObjectsOfType<KSP.UI.Screens.MissionRecoveryDialog>())
+            {
+                UnityEngine.Object.Destroy(dialog.gameObject);
+                closed++;
+            }
+            return closed;
+        }
+
         /// <summary>True while connected to a server and in the game.</summary>
         [KRPCProcedure]
         public static bool InGame() => MainSystem.NetworkState >= ClientState.Running;

@@ -87,7 +87,7 @@ public static class Taxi
         var error = Pilot.Wrap(runwayHeading + 90 - heading); // degrees to turn (positive: right)
         var steer = Math.Clamp(-error / 30, -0.6, 0.6);
         var throttle = Math.Clamp(0.12 * (Speed - speed), 0, 0.35);
-        return (steer, throttle, speed > Speed + 3, false);
+        return (steer, throttle, speed > Speed + 1, false); // +3 let it reach 8.9 m/s on the grass in the rig
     }
 }
 

@@ -4,7 +4,10 @@
 //
 //   KspWingman --model qwen3:4b [--llm http://127.0.0.1:11434/v1/] [--krpc-port 50000] [--allow "Ann,Bob"]
 //              [--call-sign Wingman] [--mcp path\to\KspWingman.Mcp.exe] [--api-key ...] [--think] [--ipc]
+//              [--planner-model qwen3:4b] [--planner-llm <URL>]
 // --ipc: JSON lines in and out, for a host app (Mission Control's Wingman tab); see Ipc.cs.
+// The planner (Learning.cs) picks free-flight goals and writes debriefs; it never flies. Without --planner-model the
+// pilot's model does it. /free [minutes] starts free flight; any order stops it.
 
 using System.Globalization;
 using System.Threading.Channels;
@@ -29,6 +32,16 @@ using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) }; // a smal
 var agent = new Agent(new OpenAiCompatibleLlm(http, options.LlmUrl, options.Model, options.ApiKey), tools,
     Agent.Prompt(options.CallSign, !options.Think));
 agent.Event += e => Ui.Line(e.Kind, e.Text);
+IPlanner planner = options.PlannerModel is { } plannerModel
+    ? OllamaThinkingPlanner.OllamaBase(options.PlannerUrl) is { } ollama
+        ? new OllamaThinkingPlanner(http, ollama, plannerModel)
+        : new ChatPlanner(new OpenAiCompatibleLlm(http, options.PlannerUrl, plannerModel, options.ApiKey))
+    : new ChatPlanner(new OpenAiCompatibleLlm(http, options.LlmUrl, options.Model, options.ApiKey));
+var hub = new EventHub();
+var learner = new Learner(tools, planner, hub, (kind, text) => Ui.Line(kind, text));
+var debriefs = new System.Collections.Concurrent.ConcurrentQueue<(System.Text.Json.Nodes.JsonNode? Data, string Outcome)>();
+var freeFlying = false;
+var stopFree = false;
 
 var first = Ui.FirstLine(await tools.CallAsync("status", new Dictionary<string, object?>(), quit.Token));
 if (!first.StartsWith("Player: ", StringComparison.Ordinal))
@@ -40,24 +53,50 @@ if (!first.StartsWith("Player: ", StringComparison.Ordinal))
 var me = first["Player: ".Length..].Split(" · ")[0];
 Ui.Line("wingman", $"Playing as {me}. {tools.Tools.Count} tools. Chat orders: " +
     (options.Allowed.Count == 0 ? "off (no --allow)." : $"\"{options.CallSign}, ...\" from {string.Join(", ", options.Allowed)}."));
-Ui.Line("wingman", "Type an order (\"take off and fly east at 1000 m\"), /status, /forget or /quit.");
+Ui.Line("wingman", "Type an order (\"take off and fly east at 1000 m\"), /status, /free [minutes], /forget or /quit." +
+    (options.PlannerModel != null ? $" Planner: {options.PlannerModel}." : ""));
 
 var orders = Channel.CreateUnbounded<(string From, string Text, bool FromChat)>();
 _ = Task.Run(async () =>
 {
     while (!quit.IsCancellationRequested && Console.ReadLine() is { } typed)
     {
-        if (options.Ipc)
+        var input = options.Ipc ? Ipc.Read(typed) : typed.Trim().Length > 0 ? ("Commander", typed.Trim()) : null;
+        if (input is not { } line)
+            continue;
+        // Answered here, not queued: a host app asks for status every few seconds, and that isn't an order (it would
+        // stop free flight).
+        if (line.Text.Equals("/status", StringComparison.OrdinalIgnoreCase))
         {
-            if (Ipc.Read(typed) is { } input)
-                await orders.Writer.WriteAsync((input.From, input.Text, false));
+            try
+            {
+                Ui.Line(options.Ipc ? "status" : "result", await tools.CallAsync("status", new Dictionary<string, object?>(), quit.Token));
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                Ui.Line("error", e.Message);
+            }
+            continue;
         }
-        else if (typed.Trim().Length > 0)
-            await orders.Writer.WriteAsync(("Commander", typed.Trim(), false));
+        if (line.Text.Equals("/stop-free", StringComparison.OrdinalIgnoreCase))
+        {
+            stopFree = true;
+            Ui.Line("free", freeFlying ? "Stopping free flight after this step." : "Free flight isn't on.");
+            continue;
+        }
+        await orders.Writer.WriteAsync((line.Item1, line.Item2, false));
     }
     quit.Cancel();
 });
-_ = Task.Run(() => ForwardEvents(tools, quit.Token));
+_ = Task.Run(() => ForwardEvents(tools, hub, (data, outcome) =>
+{
+    // A flight the knowledge store recorded: debriefed between orders (free flight debriefs its own).
+    if (!freeFlying)
+    {
+        debriefs.Enqueue((data, outcome));
+        orders.Writer.TryWrite(("(debrief)", "/debrief", false));
+    }
+}, quit.Token));
 if (options.Allowed.Count > 0)
     _ = Task.Run(() => ListenToChat(tools, options, me, orders.Writer, quit.Token));
 
@@ -89,9 +128,29 @@ try
             Ui.Line("wingman", "Forgot the conversation.");
             continue;
         }
-        if (text.Equals("/status", StringComparison.OrdinalIgnoreCase))
+        if (text == "/debrief" && from == "(debrief)")
         {
-            Ui.Line(options.Ipc ? "status" : "result", await tools.CallAsync("status", new Dictionary<string, object?>(), quit.Token)); // a host app tells it from tool results
+            if (debriefs.TryDequeue(out var flight))
+                await learner.DebriefAsync(flight.Data, flight.Outcome, quit.Token);
+            continue;
+        }
+        if (text.StartsWith("/free", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/free-", StringComparison.OrdinalIgnoreCase))
+        {
+            var minutes = double.TryParse(text[5..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var m) ? m : 30;
+            freeFlying = true;
+            stopFree = false;
+            Ui.Line("free", string.Create(CultureInfo.InvariantCulture, $"Free flight for {Math.Clamp(minutes, 5, 240):0} minutes: practising landings around KSC. Any order stops it."));
+            string done;
+            try
+            {
+                done = await learner.FreeFlyAsync(minutes, new FreeFlightLimits(), () => stopFree || orders.Reader.Count > 0, quit.Token);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                done = "Free flight stopped: " + e.Message;
+            }
+            freeFlying = false;
+            Ui.Line("free", done);
             continue;
         }
         Ui.Line(fromChat ? "chat" : "order", $"{from}: {text}");
@@ -115,10 +174,12 @@ catch (OperationCanceledException)
 Ui.Line("wingman", "Bye. The plane keeps doing what it was last told; stop_flying hands it back.");
 return 0;
 
-// The MCP server's own events (phases, flight outcomes, the tower's messages), every 2 s: shown, or passed on in --ipc.
-static async Task ForwardEvents(McpTools tools, CancellationToken cancel)
+// The MCP server's own events (phases, flight outcomes, the tower's messages), every 2 s: shown, or passed on in --ipc;
+// kept in the hub for free flight; a flight the knowledge store recorded goes to the debrief.
+static async Task ForwardEvents(McpTools tools, EventHub hub, Action<System.Text.Json.Nodes.JsonNode?, string> recorded, CancellationToken cancel)
 {
     long last = 0;
+    var lastOutcome = "";
     while (!cancel.IsCancellationRequested)
     {
         try
@@ -131,7 +192,13 @@ static async Task ForwardEvents(McpTools tools, CancellationToken cancel)
                     continue;
                 last = Math.Max(last, n);
                 var kind = e["kind"]?.GetValue<string>() ?? "event";
-                Ui.Line(kind == "outcome" ? "flight" : kind, e["text"]?.GetValue<string>() ?? "", e["data"]);
+                var said = e["text"]?.GetValue<string>() ?? "";
+                Ui.Line(kind == "outcome" ? "flight" : kind, said, e["data"]);
+                hub.Add(kind, said, e["data"]);
+                if (kind == "outcome")
+                    lastOutcome = said;
+                else if (kind == "knowledge")
+                    recorded(e["data"], lastOutcome);
             }
         }
         catch (Exception e) when (e is System.Text.Json.JsonException or InvalidOperationException or IOException or HttpRequestException)
@@ -168,12 +235,15 @@ static async Task ListenToChat(McpTools tools, Options options, string me, Chann
 }
 
 internal sealed record Options(Uri LlmUrl, string Model, string? ApiKey, string KrpcHost, int KrpcPort, string McpExe,
-    string CallSign, IReadOnlyCollection<string> Allowed, bool Think, string? Problem, bool Ipc = false)
+    string CallSign, IReadOnlyCollection<string> Allowed, bool Think, string? Problem, bool Ipc = false, string? PlannerModel = null, Uri? PlannerLlm = null)
 {
+    /// <summary>The planner's server: its own, or the pilot's.</summary>
+    public Uri PlannerUrl => PlannerLlm ?? LlmUrl;
+
     public const string Usage =
         "Usage: KspWingman --model <name> [--llm <OpenAI-compatible URL, default Ollama: http://127.0.0.1:11434/v1/>] " +
         "[--api-key <key>] [--krpc-host 127.0.0.1] [--krpc-port 50000] [--mcp <KspWingman.Mcp.exe>] " +
-        "[--call-sign Wingman] [--allow \"Player1,Player2\"] [--think] [--ipc]";
+        "[--call-sign Wingman] [--allow \"Player1,Player2\"] [--think] [--ipc] [--planner-model <name>] [--planner-llm <URL>]";
 
     public static Options Parse(string[] args)
     {
@@ -198,10 +268,16 @@ internal sealed record Options(Uri LlmUrl, string Model, string? ApiKey, string 
         else if (!File.Exists(mcp))
             problem = $"No MCP server at {mcp}: put KspWingman.Mcp.exe next to this one, or pass --mcp.";
         var allowed = (Get("--allow") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var plannerUrl = Get("--planner-llm", "WINGMAN_PLANNER_URL");
+        if (plannerUrl != null && !plannerUrl.EndsWith('/'))
+            plannerUrl += "/";
+        if (problem == null && plannerUrl != null && !Uri.TryCreate(plannerUrl, UriKind.Absolute, out _))
+            problem = $"Not a URL: {plannerUrl}";
         return new Options(problem == null ? new Uri(url) : new Uri("http://invalid/"), model ?? "", Get("--api-key", "WINGMAN_LLM_KEY"),
             Get("--krpc-host", "WINGMAN_KRPC_HOST") ?? "127.0.0.1", problem == null ? int.Parse(port, CultureInfo.InvariantCulture) : 0,
             mcp, Get("--call-sign") ?? "Wingman", allowed, args.Any(a => a.Equals("--think", StringComparison.OrdinalIgnoreCase)), problem,
-            args.Any(a => a.Equals("--ipc", StringComparison.OrdinalIgnoreCase)));
+            args.Any(a => a.Equals("--ipc", StringComparison.OrdinalIgnoreCase)), Get("--planner-model", "WINGMAN_PLANNER_MODEL"),
+            problem == null && plannerUrl != null ? new Uri(plannerUrl) : null);
     }
 }
 
@@ -231,6 +307,8 @@ internal static class Ui
             "flight" => ("fly ", ConsoleColor.Magenta),
             "tower" => ("twr ", ConsoleColor.Cyan),
             "phase" => ("    ", ConsoleColor.DarkGray),
+            "free" => ("free", ConsoleColor.Yellow),
+            "debrief" or "lesson" or "knowledge" => ("lrn ", ConsoleColor.Blue),
             _ => ("··· ", ConsoleColor.Gray),
         };
         lock (Gate)

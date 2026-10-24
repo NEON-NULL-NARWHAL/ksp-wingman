@@ -12,7 +12,7 @@ public sealed class McpTools : IToolHost, IAsyncDisposable
     /// Kept from the model: the console listens to chat and says the answers itself, so a small model can't flood the
     /// chat or sit in wait_for_chat for two minutes.
     /// </summary>
-    public static readonly string[] Hidden = ["wait_for_chat", "send_chat", "read_chat", "events"];
+    public static readonly string[] Hidden = ["wait_for_chat", "send_chat", "read_chat", "events", "learn"]; // learn: only the debrief, with its evidence
 
     private readonly McpClient _client;
 

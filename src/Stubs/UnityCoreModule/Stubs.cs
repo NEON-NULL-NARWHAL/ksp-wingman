@@ -13,10 +13,17 @@ namespace UnityEngine
         public static void DontDestroyOnLoad(Object target) => throw new System.NotSupportedException();
 
         public static void Destroy(Object obj) => throw new System.NotSupportedException();
+
+        public static T[] FindObjectsOfType<T>() where T : Object => throw new System.NotSupportedException();
+    }
+
+    public sealed class GameObject : Object
+    {
     }
 
     public class Component : Object
     {
+        public GameObject gameObject => throw new System.NotSupportedException();
     }
 
     public class Behaviour : Component

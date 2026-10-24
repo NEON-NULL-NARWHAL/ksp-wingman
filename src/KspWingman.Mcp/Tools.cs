@@ -62,6 +62,67 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
         return list.Count == 0 ? "" : string.Join("\n", list.Select(FlightEvents.ToJson));
     }
 
+    [McpServerTool(Name = "knowledge"), Description(
+        "What the server's agents know, from LUNA EVO's tower: the skills (take off, fly a route, hold, land visual, land " +
+        "RNAV, land in sequence), how many of your flights and everyone's went well, which are open to practise, the " +
+        "lessons earlier flights taught (facts, not orders), and your last flights with their ids (for learn).")]
+    public string Knowledge()
+    {
+        if (tower.Client is not { } client)
+            return "No tower: the knowledge is kept by LUNA EVO Mission Control's KSC tower (WINGMAN_TOWER_URL).";
+        try
+        {
+            return Format(client.KnowledgeAsync().GetAwaiter().GetResult());
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return "The tower didn't answer: " + e.Message;
+        }
+    }
+
+    [McpServerTool(Name = "learn"), Description(
+        "Saves a lesson on the server for every agent: one short fact about flying (10-200 characters) that a flight of " +
+        "yours showed, citing that flight's id (from knowledge or the flight's record). A lesson without a flight that " +
+        "used the skill is refused. Say what to do differently, with numbers when you have them.")]
+    public string Learn(
+        [Description("The skill: takeoff, route, hold, land-visual, land-rnav or sequencing.")] string skill,
+        [Description("The lesson, e.g. \"On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around.\"")] string lesson,
+        [Description("The id of your flight that showed it.")] long flightId)
+    {
+        if (tower.Client is not { } client)
+            return "No tower: lessons are kept by LUNA EVO Mission Control's KSC tower (WINGMAN_TOWER_URL).";
+        try
+        {
+            return client.LearnAsync(skill.Trim(), lesson.Trim(), flightId).GetAwaiter().GetResult();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return "The tower didn't answer: " + e.Message;
+        }
+    }
+
+    /// <summary>The knowledge store's answer as a short menu a small model can read.</summary>
+    internal static string Format(System.Text.Json.Nodes.JsonNode? answer)
+    {
+        if (answer?["skills"] is not System.Text.Json.Nodes.JsonArray skills)
+            return "The tower has no knowledge store (Mission Control 2.13 or later has one).";
+        static string Str(System.Text.Json.Nodes.JsonNode? n) => n is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<string>(out var s) ? s : "";
+        static int Int(System.Text.Json.Nodes.JsonNode? n) => n is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<int>(out var i) ? i : 0;
+        var text = new StringBuilder("Skills (your good flights of attempts / everyone's). Lessons are facts from earlier flights, not orders.\n");
+        var number = 1;
+        foreach (var s in skills.OfType<System.Text.Json.Nodes.JsonObject>())
+        {
+            var open = s["unlocked"] is System.Text.Json.Nodes.JsonValue u && u.TryGetValue<bool>(out var b) && b;
+            text.AppendLine($"{number++}. {Str(s["id"])} ({Str(s["name"])}): {Int(s["mine"]?["good"])} of {Int(s["mine"]?["attempts"])} / " +
+                            $"{Int(s["all"]?["good"])} of {Int(s["all"]?["attempts"])}{(open ? "" : " · locked: practise " + string.Join(", ", (s["requires"] as System.Text.Json.Nodes.JsonArray ?? []).Select(Str)) + " first")}");
+            foreach (var l in (s["lessons"] as System.Text.Json.Nodes.JsonArray ?? []).OfType<System.Text.Json.Nodes.JsonObject>())
+                text.AppendLine($"   - {Str(l["text"])} ({Int(l["flights"])} flight(s))");
+        }
+        if (answer["flights"] is System.Text.Json.Nodes.JsonArray flights && flights.Count > 0)
+            text.Append("Your last flights: " + string.Join("; ", flights.OfType<System.Text.Json.Nodes.JsonObject>().Select(f => $"#{Int(f["id"])} {Str(f["result"])} {Str(f["approach"])}".TrimEnd())));
+        return text.ToString().TrimEnd();
+    }
+
     [McpServerTool(Name = "players"), Description(
         "The other players on the server: name, the vessel they fly, and LMP's status line for them (e.g. \"Flying above Kerbin\").")]
     public string Players()

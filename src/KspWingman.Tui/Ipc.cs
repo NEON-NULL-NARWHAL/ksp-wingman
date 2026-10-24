@@ -12,8 +12,8 @@ public static class Ipc
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>
-    /// One input line: {"type":"order","text":"...","from":"..."}, {"type":"status"}, {"type":"forget"} or
-    /// {"type":"quit"}; plain text is an order. Returns the console's own command text ("/status", "/quit!"...) or the
+    /// One input line: {"type":"order","text":"...","from":"..."}, {"type":"status"}, {"type":"forget"},
+    /// {"type":"free","minutes":30}, {"type":"stop-free"} or {"type":"quit"}; plain text is an order. Returns the console's own command text ("/status", "/quit!"...) or the
     /// order, and who it's from; null for an empty or unreadable line.
     /// </summary>
     public static (string From, string Text)? Read(string line)
@@ -34,6 +34,9 @@ public static class Ipc
                 "status" => (from, "/status"),
                 "forget" => (from, "/forget"),
                 "quit" => (from, "/quit!"), // a host app means it: no "still flying" question
+                "free" => (from, "/free " + (o["minutes"] is JsonValue mv && mv.TryGetValue<double>(out var minutes) && double.IsFinite(minutes)
+                    ? Math.Clamp(minutes, 5, 240).ToString(System.Globalization.CultureInfo.InvariantCulture) : "30")),
+                "stop-free" => (from, "/stop-free"),
                 _ => null,
             };
         }

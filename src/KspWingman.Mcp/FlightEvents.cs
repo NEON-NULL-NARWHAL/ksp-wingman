@@ -28,6 +28,9 @@ public sealed class FlightEvents
 
     public FlightEvents(string? logPath = null) => _logPath = logPath;
 
+    /// <summary>Raised after each event (the tower client records outcomes with the knowledge store).</summary>
+    public event Action<WingmanEvent>? Added;
+
     public WingmanEvent Add(string kind, string text, object? data = null)
     {
         WingmanEvent e;
@@ -51,6 +54,7 @@ public sealed class FlightEvents
                 // A full disk loses the log, not the flight.
             }
         }
+        Added?.Invoke(e);
         return e;
     }
 
@@ -74,6 +78,7 @@ public sealed class FlightWatch : IDisposable
     private readonly Director _director;
     private readonly FlightEvents _events;
     private readonly PhaseTracker _tracker = new();
+    private string? _craft;
     private readonly CancellationTokenSource _stop = new();
 
     public FlightWatch(string host, int port, Director director, FlightEvents events)
@@ -100,13 +105,14 @@ public sealed class FlightWatch : IDisposable
                     if (FlightTools.Wrecked(v))
                         return new PhaseInput(true, "Flying", true, 0, 0, 0, _director.Doing);
                     var g = v.Flight(v.Orbit.Body.ReferenceFrame);
+                    _craft = v.Name;
                     return new PhaseInput(true, v.Situation.ToString(), false, g.Speed, g.VerticalSpeed, g.SurfaceAltitude, _director.Doing);
                 });
                 if (_tracker.Update(input, DateTime.UtcNow, _director.Approach, _director.LastLanding) is { } change)
                 {
                     _events.Add("phase", $"{change.From} → {change.To}", new { from = change.From.ToString(), to = change.To.ToString() });
                     if (change.Outcome is { } o)
-                        _events.Add("outcome", Describe(o), o);
+                        _events.Add("outcome", Describe(o), o with { Craft = _craft });
                 }
             }
             catch (Exception e) when (e is WingmanException or IOException or System.InvalidOperationException)

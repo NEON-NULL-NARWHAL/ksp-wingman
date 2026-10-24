@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0 (2026-10-24): free flight and learning
+
+### Added
+- **Learning, on the server** (LUNA EVO Mission Control 2.13's tower): every finished flight goes to the server's
+  knowledge store, which grades the skills it used (take off, fly a route, hold, land visual, land RNAV, land in
+  sequence). New tools: `knowledge` (each skill's numbers, yours and everyone's, which are open, the lessons, your last
+  flights) and `learn` (a lesson citing one of your flights; the console's debrief uses it).
+- **The planner**: `--planner-model` (and `--planner-llm`), a model that thinks (with Ollama, through its own API so
+  thinking is on), for decisions and debriefs; it never touches the controls. Default: the pilot's model.
+- **The debrief**: after each recorded flight the planner writes one lesson from the record; the console checks it
+  (advice for a skill the flight used, not a report) and saves it with the flight as evidence.
+- **Free flight**: `/free [minutes]` (or `{"type":"free"}` in `--ipc`): the planner picks a goal from a menu (the
+  approaches to practise, with their numbers), code flies it inside a box around KSC (25 km, 3,000 m), stops after two
+  crashes in a row, drops a goal that failed twice without a lesson; any order or `/stop-free` stops it.
+- `land` with an approach's name asks the tower for it (granted when nobody else is waiting); the tower's short visual
+  is flown like any route.
+
+### Fixed (found in the rig)
+- A launch with no kerbal free stopped on KSP's "No Control!" question and never returned (every kerbal was in a
+  parked plane): `launch` now says so instead (the bridge counts free kerbals).
+- After a recovery, KSP's Mission Summary held the next launch up: the bridge closes it before launching.
+- Taxiing reached 8.9 m/s on the grass (brakes only above 9): it brakes above 7 now.
+- `/status` from a host app is answered at once instead of waiting behind an order.
+
+### Changed
+- The tower's fixes are flown from 300 m (was 400), for the short visual's final fix (LUNA EVO's audit 15).
+
 ## 0.6.0 (2026-10-23): events, --ipc, taxiing
 
 ### Added

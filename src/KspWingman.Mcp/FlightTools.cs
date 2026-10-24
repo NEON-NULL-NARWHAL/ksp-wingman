@@ -33,6 +33,8 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         [Description("\"Runway\" (from the SPH) or \"LaunchPad\" (from the VAB).")] string site = "Runway") => krpc.Run(connection =>
     {
         var scene = connection.KRPC().GameScene;
+        if (scene != GameScene.Flight)
+            director.Stop(); // a new vessel: the last one's words ("Parked beside...") mustn't carry over
         if (scene == GameScene.Flight)
         {
             // From flight only when the current vessel is done (on the ground, in the sea, or wrecked); never mid-flight.
@@ -48,11 +50,36 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         var space = connection.SpaceCenter();
         if (!space.LaunchableVessels(directory).Contains(craft))
             return $"Not launched: no craft called \"{craft}\" in the {directory}. Craft there: {string.Join(", ", space.LaunchableVessels(directory))}.";
+        try
+        {
+            krpc.Wingman<int>("CloseDialogs"); // a Mission Summary from the last recovery would hold the launch up
+        }
+        catch (Exception e) when (e is WingmanException or KRPC.Client.RPCException or System.InvalidOperationException)
+        {
+            // An older bridge: launch anyway.
+        }
+        if (AvailableCrew() == 0)
+            return "Not launched: no kerbals are free; they're all aboard other vessels (planes parked beside the runway keep " +
+                   "their crew). Recover one: fly it and recover, or in KSP's Tracking Station. Otherwise KSP would stop on a " +
+                   "\"No Control\" question nobody can answer from here.";
         space.LaunchVessel(directory, craft, directory == "VAB" ? "LaunchPad" : "Runway", null, true, "");
         return $"Launching {craft} on the {(directory == "VAB" ? "launch pad" : "runway")}. It takes a few seconds; then status shows it. " +
                (directory == "SPH" ? "It's on the ground, not flying: next, take_off. " : "It's on the pad: next, stage to launch. ") +
                "Mind LMP's safety bubble: other players can't see the agent within 100 m of the pad or the runway start.";
     });
+
+    /// <summary>Free kerbals from the bridge, or -1 when it can't say (an older bridge, no game).</summary>
+    private int AvailableCrew()
+    {
+        try
+        {
+            return krpc.Wingman<int>("AvailableCrew");
+        }
+        catch (Exception e) when (e is WingmanException or KRPC.Client.RPCException or System.InvalidOperationException)
+        {
+            return -1;
+        }
+    }
 
     [McpServerTool(Name = "fly"), Description(
         "Flies the agent's plane (in the air) at a compass heading, altitude and speed, and keeps flying it there until told " +
@@ -111,8 +138,9 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         [Description("An approach's name from approaches (\"RNAV 09 NORTH\" or just \"NORTH\"), \"visual\" for a plain circuit, or leave out for the tower's pick.")] string? approach = null)
     {
         // With LUNA EVO's tower (WINGMAN_TOWER_URL), the tower decides: it clears an approach or holds the plane.
-        if (tower.Client is { } client && approach is not { Length: > 0 } && krpc.Run(c => InFlight(c, out _)?.Situation == VesselSituation.Flying))
-            return client.RequestApproachAsync().GetAwaiter().GetResult();
+        // An approach named with a tower is a request: granted when nobody else is waiting (free flight practises them).
+        if (tower.Client is { } client && krpc.Run(c => InFlight(c, out _)?.Situation == VesselSituation.Flying))
+            return client.RequestApproachAsync(approach).GetAwaiter().GetResult();
         return LandOnOwn(runway, approach);
     }
 
@@ -198,16 +226,37 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
 
     [McpServerTool(Name = "recover"), Description(
         "Recovers the agent's vessel when it's landed or splashed (back to the Space Center, ready to launch again).")]
-    public string Recover() => krpc.Run(connection =>
+    public string Recover()
     {
-        var vessel = InFlight(connection, out var problem);
-        if (vessel == null)
-            return problem!;
-        if (!vessel.Recoverable)
-            return $"Can't recover it now ({vessel.Situation}): land or stop first.";
-        vessel.Recover();
-        return "Recovered; back to the Space Center.";
-    });
+        var result = krpc.Run(connection =>
+        {
+            var vessel = InFlight(connection, out var problem);
+            if (vessel == null)
+                return problem!;
+            if (!vessel.Recoverable)
+                return $"Can't recover it now ({vessel.Situation}): land or stop first.";
+            vessel.Recover();
+            return "Recovered; back to the Space Center.";
+        });
+        if (!result.StartsWith("Recovered", StringComparison.Ordinal))
+            return result;
+        // KSP's Mission Summary comes up a moment later, in the Space Center; nobody can click it from here, and with it
+        // open the next launch hung half-loaded in the rig. Close it as soon as it's there (an older bridge can't).
+        for (var i = 0; i < 16; i++)
+        {
+            Thread.Sleep(500);
+            try
+            {
+                if (krpc.Wingman<int>("CloseDialogs") > 0)
+                    break;
+            }
+            catch (Exception e) when (e is WingmanException or KRPC.Client.RPCException or System.InvalidOperationException)
+            {
+                break;
+            }
+        }
+        return result;
+    }
 
     [McpServerTool(Name = "take_off"), Description(
         "Takes a plane off the runway, climbs out and then flies on at the heading, altitude and speed given (no fly needed " +
