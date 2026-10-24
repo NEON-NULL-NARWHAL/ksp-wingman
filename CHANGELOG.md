@@ -15,6 +15,12 @@
   parks 90 m beside the runway, brakes on, instead of recovering the plane. The tower clears the next plane once it's
   off.
 
+### Found in the rig (two KSPs, two agents, one tower)
+- RigPilot landed 1,329 m down the runway, 8 m off the centerline, taxied off and parked 98 m beside it; the tower
+  cleared RigViewer 14 s after the landing, and it landed 1,037 m down, 16 m off, and taxied off too.
+- Fixed from it: a plane settling after it spawns looked like a takeoff roll (now more than 3 m/s to start rolling,
+  under 1 to stop), and the end of a taxi, still braking, looked like a takeoff.
+
 ## 0.5.1 (2026-10-23)
 
 ### Security
