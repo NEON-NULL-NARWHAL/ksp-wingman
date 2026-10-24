@@ -80,6 +80,42 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
         }
     }
 
+    [McpServerTool(Name = "procedures"), Description(
+        "LUNA EVO's tower's published table, as JSON: every fix (position, altitude, speed), the legs allowed between them, " +
+        "and the final fixes, to build a flight plan for file_plan.")]
+    public string Procedures()
+    {
+        if (tower.Client is not { } client)
+            return "No tower: the procedures come from LUNA EVO Mission Control's KSC tower (WINGMAN_TOWER_URL).";
+        try
+        {
+            return client.ProceduresAsync().GetAwaiter().GetResult()?.ToJsonString() ?? "The tower has no procedures (Mission Control 2.15 or later).";
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return "The tower didn't answer: " + e.Message;
+        }
+    }
+
+    [McpServerTool(Name = "file_plan"), Description(
+        "Files a flight plan with the tower and flies it when cleared: fix names from procedures, in order, ending on a " +
+        "final fix (e.g. \"KSC-DS KSC-S1 KSC-S2 KSC-S3 F09\"). The tower clears it as filed, holds the plane for traffic, " +
+        "or says why it can't.")]
+    public string FilePlan([Description("Fix names in order, separated by spaces.")] string fixes)
+    {
+        if (tower.Client is not { } client)
+            return "No tower: flight plans are filed with LUNA EVO Mission Control's KSC tower (WINGMAN_TOWER_URL).";
+        var names = fixes.Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries).Take(12).ToList();
+        try
+        {
+            return client.FilePlanAsync(names).GetAwaiter().GetResult();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return "The tower didn't answer: " + e.Message;
+        }
+    }
+
     [McpServerTool(Name = "learn"), Description(
         "Saves a lesson on the server for every agent: one short fact about flying (10-200 characters) that a flight of " +
         "yours showed, citing that flight's id (from knowledge or the flight's record). A lesson without a flight that " +

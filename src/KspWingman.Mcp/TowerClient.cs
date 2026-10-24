@@ -140,6 +140,22 @@ public sealed class TowerClient : IDisposable
         }
     }
 
+    /// <summary>The tower's published table (fixes, legs, final fixes), for a plan of the agent's own.</summary>
+    public async Task<JsonNode?> ProceduresAsync()
+    {
+        _callSign ??= _link.Wingman<string>("PlayerName");
+        return await PostRawAsync("v1/procedures", new JsonObject { ["callSign"] = _callSign });
+    }
+
+    /// <summary>Files a flight plan (fix names): the tower clears it as filed, holds the plane, or says why it can't.</summary>
+    public async Task<string> FilePlanAsync(IReadOnlyList<string> fixes)
+    {
+        _wantsToLand = true;
+        _callSign ??= _link.Wingman<string>("PlayerName");
+        var answers = await Handle(await PostAsync("v1/plan", new JsonObject { ["callSign"] = _callSign, ["fixes"] = new JsonArray(fixes.Select(f => (JsonNode)f).ToArray()) }));
+        return answers.Count == 0 ? "Filed with KSC tower; its answer will show in status." : string.Join(" ", answers);
+    }
+
     /// <summary>The knowledge store's skills (with this agent's and everyone's numbers), lessons and last flights.</summary>
     public async Task<JsonNode?> KnowledgeAsync()
     {

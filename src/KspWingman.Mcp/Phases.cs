@@ -36,8 +36,9 @@ public readonly record struct PhaseChange(Phase From, Phase To, FlightOutcome? O
 /// </summary>
 /// <param name="Phases">The phases it went through, in order (the knowledge store grades skills from them).</param>
 /// <param name="Craft">The vessel's name.</param>
+/// <param name="MaxSpeed">The fastest it flew (m/s), and <paramref name="MaxHeight"/> the highest above the ground (m).</param>
 public sealed record FlightOutcome(string Result, double Minutes, int GoArounds, string? Approach, LandingResult? Landing,
-    IReadOnlyList<string>? Phases = null, string? Craft = null);
+    IReadOnlyList<string>? Phases = null, string? Craft = null, double MaxSpeed = 0, double MaxHeight = 0);
 
 /// <summary>Where a landing stopped: meters down the runway from the threshold, off the centerline, and the heading error.</summary>
 public sealed record LandingResult(string Runway, double DownRunway, double OffCenterline, double HeadingError);
@@ -50,6 +51,7 @@ public sealed class PhaseTracker
     private int _goArounds;
     private bool _inGoAround;
     private readonly List<Phase> _visited = [];
+    private double _maxSpeed, _maxHeight;
 
     public Phase Phase => _phase;
 
@@ -60,6 +62,11 @@ public sealed class PhaseTracker
     public PhaseChange? Update(PhaseInput s, DateTime now, string? approach = null, LandingResult? landing = null)
     {
         var next = Classify(s);
+        if (Airborne(_phase) || Airborne(next))
+        {
+            _maxSpeed = Math.Max(_maxSpeed, s.Speed);
+            _maxHeight = Math.Max(_maxHeight, s.HeightAboveGround);
+        }
         // Go-arounds counted on the pilot's own word, once each.
         var goingAround = s.Pilot.Contains("going around", StringComparison.OrdinalIgnoreCase) ||
                           s.Pilot.StartsWith("Going around", StringComparison.Ordinal);
@@ -98,8 +105,9 @@ public sealed class PhaseTracker
             if (result != null)
             {
                 outcome = new FlightOutcome(result, Math.Round(minutes, 1), _goArounds, approach, result == "landed" ? landing : null,
-                    _visited.Select(p => p.ToString()).ToList());
+                    _visited.Select(p => p.ToString()).ToList(), MaxSpeed: Math.Round(_maxSpeed), MaxHeight: Math.Round(_maxHeight));
                 _visited.Clear();
+                _maxSpeed = _maxHeight = 0;
                 _flightStarted = null;
                 _landedThisFlight = false; // a takeoff from here is a new flight
             }
@@ -148,6 +156,7 @@ public sealed class PhaseTracker
             return Phase.Holding;
         // Any of the tower's routes ("Flying RNAV 09 SOUTH: ...", "Flying VISUAL 09: ..."; the rig's visual was graded without its route).
         if (p.StartsWith("Flying RNAV", StringComparison.Ordinal) || p.StartsWith("Flying VISUAL", StringComparison.Ordinal) ||
+            p.StartsWith("Flying FILED", StringComparison.Ordinal) || p.StartsWith("Flying DIRECT", StringComparison.Ordinal) ||
             p.StartsWith("Flying the tower", StringComparison.Ordinal) || p.StartsWith("Flying to the final", StringComparison.Ordinal) ||
             p.StartsWith("Going around", StringComparison.Ordinal) || p.StartsWith("Landing, going around", StringComparison.Ordinal))
             return Phase.OnRoute;

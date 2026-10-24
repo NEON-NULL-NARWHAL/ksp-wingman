@@ -98,6 +98,10 @@ Before the prompt listed the skill ids (and the debrief matched names to them), 
 they wrote "Landing" or "RNAV Landing". `qwen3:4b-thinking` on Ollama is the same model as `qwen3:4b`.
 Next: Gemma 4 E4B as the pilot too (one model), and bigger planners on the owner's cluster with PlannerEval first.
 
+Flight plans (PlannerEval, five starting positions, the tower's real table): gemma4:e4b 5/5 valid, 4.4 fixes a plan,
+3.6 s (e.g. far west: "KSC-W12 F09"; north after takeoff: "KSC-DN KSC-N1 KSC-N2 KSC-N3 F09"); qwen3:8b 0/5 (it wrote
+an analysis and never the PLAN line), 40.7 s.
+
 ## Gemma 4 E4B as one model that plans and flies (to test, 2026-10-23)
 
 Why it's interesting: one small model doing both roles (thinking planner and fast pilot) would keep the console simple

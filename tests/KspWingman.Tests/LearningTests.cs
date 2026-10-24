@@ -46,12 +46,12 @@ public sealed class LearningTests
         Assert.Equal((3, 4), proficiency["land-rnav"]);
 
         var menu = FreeFlight.Menu([]);
-        Assert.Equal(4, menu.Count);
+        Assert.Equal(8, menu.Count); // four landings, a flight plan of its own, and the training drills
         Assert.Contains("4. land on the short visual (land-visual: 0 of 2 good)", FreeFlight.Prompt(menu, proficiency, 30));
         Assert.Equal(("RNAV 09 SOUTH", "need more south practice"), (FreeFlight.Choose("2 - need more south practice", menu, proficiency).Goal.Approach,
             FreeFlight.Choose("2 - need more south practice", menu, proficiency).Why));
-        Assert.Equal("visual", FreeFlight.Choose("I think we should fly", menu, proficiency).Goal.Approach); // no number: the weakest
-        Assert.Equal("visual", FreeFlight.Choose("9", menu, proficiency).Goal.Approach); // not on the menu
+        Assert.Equal("fast", FreeFlight.Choose("I think we should fly", menu, proficiency).Goal.Approach); // no number: a skill never tried first
+        Assert.Equal("fast", FreeFlight.Choose("9", menu, proficiency).Goal.Approach); // not on the menu
 
         // Failed twice in a row without a lesson: off the menu until something else is practised.
         var visual = FreeFlight.Goals[3];

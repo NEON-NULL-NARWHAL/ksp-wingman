@@ -73,7 +73,8 @@ public static partial class Debrief
         "with a verb (e.g. \"Slow to 85 m/s before F09 to stop closer to the centerline.\"), 10 to 200 characters, with " +
         "numbers from the record when you can. Don't just repeat what happened, and don't repeat a lesson that's already " +
         "there. SKILL is one of these ids, exactly: " + string.Join(", ", skills.Keys) + ". Answer exactly:\n" +
-        "SKILL: <skill id> | LESSON: <sentence>\nIf the flight taught nothing new, answer NONE.";
+        "SKILL: <skill id> | LESSON: <sentence>\nIf the flight taught nothing new, answer NONE." +
+        (skills.Values.All(good => good) ? " Every grade is good: answer NONE unless the record shows something clearly worth improving." : "");
 
     /// <summary>The planner's answer as (skill, lesson), when it's one of the flight's skills and a sane sentence.</summary>
     public static (string Skill, string Lesson)? Parse(string answer, IReadOnlyCollection<string> skills)
@@ -130,7 +131,36 @@ public static partial class FreeFlight
         new("land-rnav", "land on RNAV 09 SOUTH", "RNAV 09 SOUTH"),
         new("land-rnav", "land on RNAV 09 STRAIGHT-IN", "RNAV 09 STRAIGHT-IN"),
         new("land-visual", "land on the short visual", "visual"),
+        new("route", "file your own flight plan from the tower's table and fly it", "plan"),
+        new("fly-fast", "fly fast (220 m/s legs), then land", "fast"),
+        new("fly-high", "climb above 5,000 m, then come down and land", "high"),
+        new("new-craft", "fly and land a plane you haven't flown", "craft"),
     ];
+
+    /// <summary>What a training order means (the owner's "fly fast", "fly high", "work on landings", "try different planes").</summary>
+    public static IReadOnlyList<string>? Focus(string words)
+    {
+        var w = words.Trim().ToLowerInvariant();
+        if (w.Length == 0)
+            return null;
+        if (w.Contains("fast") || w.Contains("speed")) return ["fly-fast"];
+        if (w.Contains("high") || w.Contains("altitude") || w.Contains("climb")) return ["fly-high"];
+        if (w.Contains("plane") || w.Contains("craft") || w.Contains("aircraft")) return ["new-craft"];
+        if (w.Contains("plan") || w.Contains("route")) return ["route"];
+        if (w.Contains("visual")) return ["land-visual"];
+        if (w.Contains("rnav")) return ["land-rnav"];
+        if (w.Contains("land")) return ["land-rnav", "land-visual"];
+        return Goals.Any(g => g.Skill == w) ? [w] : null;
+    }
+
+    /// <summary>Learned: this many good flights in a row at the focus.</summary>
+    public const int LearnedInARow = 3;
+
+    /// <summary>The planes the SPH has ("SPH (runway): Aeris 3A, Stearwing A300"), from launchable_craft.</summary>
+    public static IReadOnlyList<string> Planes(string launchable) =>
+        launchable.Split('\n').FirstOrDefault(l => l.StartsWith("SPH", StringComparison.Ordinal)) is { } line && line.IndexOf(':') is var i and > 0
+            ? line[(i + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
 
     /// <summary>A skill's numbers from the knowledge tool's menu ("1. land-rnav (Land, RNAV): 2 of 5 / 3 of 9").</summary>
     public static Dictionary<string, (int Good, int Attempts)> Proficiency(string knowledge)
@@ -148,8 +178,8 @@ public static partial class FreeFlight
     /// The menu for the planner: each goal with its skill's numbers. A goal failed twice in a row without a lesson in
     /// between is left out (practise something else first).
     /// </summary>
-    public static IReadOnlyList<Goal> Menu(IReadOnlyList<(Goal Goal, bool Good, bool Lesson)> history) =>
-        Goals.Where(g =>
+    public static IReadOnlyList<Goal> Menu(IReadOnlyList<(Goal Goal, bool Good, bool Lesson)> history, IReadOnlyList<string>? focus = null) =>
+        Goals.Where(g => focus == null || focus.Contains(g.Skill)).Where(g =>
         {
             var last = history.Where(h => h.Goal == g).TakeLast(2).ToList();
             return !(last.Count == 2 && last.All(h => !h.Good) && !last[^1].Lesson);

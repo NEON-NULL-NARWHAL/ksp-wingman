@@ -19,10 +19,18 @@ var llm = new Uri(Get("--llm") ?? "http://127.0.0.1:11434/v1/");
 var runs = int.Parse(Get("--runs") ?? "1", CultureInfo.InvariantCulture);
 var think = !args.Contains("--no-think");
 var flights = Flights(Get("--flights") ?? Path.Combine(AppContext.BaseDirectory, "flights.json"));
+// The tower's published table (LUNA EVO's /v1/procedures), for flight plans the planner builds itself.
+var table = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Get("--procedures") ?? Path.Combine(AppContext.BaseDirectory, "procedures.json")))!;
+var tableText = FlightPlan.Describe(table);
+(string Where, double Along, double Cross)[] starts =
+[
+    ("just after takeoff, south side", 4000, 2000), ("just after takeoff, north side", 4000, -2500), ("far out west", -15_000, 1000),
+    ("far south", 1000, 9000), ("in the overhead hold", 900, 0),
+];
 using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
 
 var report = new StringBuilder($"# Planner eval ({DateTime.Now:yyyy-MM-dd HH:mm})\n\n{flights.Count} debriefs and {Menus.Count} goal choices per run, {runs} run(s), thinking {(think ? "on" : "off")}.\n\n" +
-    "| Model | Lessons accepted | Goal picks valid | Picked the weakest | Mean s | Slowest s |\n|---|---|---|---|---|---|\n");
+    "| Model | Lessons accepted | Goal picks valid | Picked the weakest | Plans valid | Fixes a plan | Mean s | Slowest s |\n|---|---|---|---|---|---|---|---|\n");
 var lessons = new StringBuilder();
 foreach (var model in models)
 {
@@ -31,7 +39,7 @@ foreach (var model in models)
         : new ChatPlanner(new OpenAiCompatibleLlm(http, llm, model, null));
     await planner.AskAsync("Answer OK.", "OK?", CancellationToken.None); // loaded before timing
     var times = new List<double>();
-    int accepted = 0, valid = 0, weakest = 0, debriefs = 0, goals = 0;
+    int accepted = 0, valid = 0, weakest = 0, debriefs = 0, goals = 0, plans = 0, goodPlans = 0, planFixes = 0;
     lessons.AppendLine($"\n## {model}\n");
     for (var run = 0; run < runs; run++)
     {
@@ -53,9 +61,20 @@ foreach (var model in models)
             valid += picked ? 1 : 0;
             weakest += picked && FreeFlight.Choose(answer, menu, proficiency).Goal.Skill == weakestGoal ? 1 : 0;
         }
+        foreach (var (where, along, cross) in starts)
+        {
+            var (answer, seconds) = await Timed(planner, FlightPlan.System, FlightPlan.Prompt(tableText, $"{where}: {FlightPlan.Where(along, cross)}"));
+            times.Add(seconds);
+            plans++;
+            var plan = FlightPlan.Parse(answer);
+            var problem = plan.Count == 0 ? "no PLAN line" : FlightPlan.Check(table, plan, along, cross);
+            goodPlans += problem == null ? 1 : 0;
+            planFixes += problem == null ? plan.Count : 0;
+            lessons.AppendLine($"- plan from {where}: {(problem == null ? string.Join(" ", plan) : $"refused ({problem}): `{OneLine(answer)}`")} ({seconds:0} s)");
+        }
     }
     var line = string.Create(CultureInfo.InvariantCulture,
-        $"| {model} | {accepted}/{debriefs} | {valid}/{goals} | {weakest}/{goals} | {times.Average():0.0} | {times.Max():0} |");
+        $"| {model} | {accepted}/{debriefs} | {valid}/{goals} | {weakest}/{goals} | {goodPlans}/{plans} | {(goodPlans > 0 ? (double)planFixes / goodPlans : 0):0.0} | {times.Average():0.0} | {times.Max():0} |");
     Console.WriteLine(line);
     report.AppendLine(line);
 }

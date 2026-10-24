@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\KspWingman.Tui\KspWingman.Tui.csproj" />
     <None Include="flights.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="procedures.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

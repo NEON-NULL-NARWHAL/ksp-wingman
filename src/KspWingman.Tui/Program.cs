@@ -29,7 +29,10 @@ Ui.Line("wingman", $"KSP Wingman console. Model {options.Model} at {options.LlmU
 
 await using var tools = await McpTools.StartAsync(options.McpExe, options.KrpcHost, options.KrpcPort, quit.Token);
 using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) }; // a small model on a busy GPU can take a while
-var agent = new Agent(new OpenAiCompatibleLlm(http, options.LlmUrl, options.Model, options.ApiKey), tools,
+var orders = Channel.CreateUnbounded<(string From, string Text, bool FromChat)>();
+// The pilot model gets one tool of the console's own: train (it queues a training run after the order).
+var withTrain = new TrainTool(tools, (focus, minutes) => orders.Writer.TryWrite(("(train)", $"/train {focus} {minutes.ToString(CultureInfo.InvariantCulture)}", false)));
+var agent = new Agent(new OpenAiCompatibleLlm(http, options.LlmUrl, options.Model, options.ApiKey), withTrain,
     Agent.Prompt(options.CallSign, !options.Think));
 agent.Event += e => Ui.Line(e.Kind, e.Text);
 IPlanner planner = options.PlannerModel is { } plannerModel
@@ -56,7 +59,6 @@ Ui.Line("wingman", $"Playing as {me}. {tools.Tools.Count} tools. Chat orders: " 
 Ui.Line("wingman", "Type an order (\"take off and fly east at 1000 m\"), /status, /free [minutes], /forget or /quit." +
     (options.PlannerModel != null ? $" Planner: {options.PlannerModel}." : ""));
 
-var orders = Channel.CreateUnbounded<(string From, string Text, bool FromChat)>();
 _ = Task.Run(async () =>
 {
     while (!quit.IsCancellationRequested && Console.ReadLine() is { } typed)
@@ -134,16 +136,29 @@ try
                 await learner.DebriefAsync(flight.Data, flight.Outcome, quit.Token);
             continue;
         }
-        if (text.StartsWith("/free", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/free-", StringComparison.OrdinalIgnoreCase))
+        var training = text.StartsWith("/train", StringComparison.OrdinalIgnoreCase);
+        if (training || (text.StartsWith("/free", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/free-", StringComparison.OrdinalIgnoreCase)))
         {
-            var minutes = double.TryParse(text[5..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var m) ? m : 30;
+            // "/free [minutes]", or "/train <what> [minutes]" (fly fast, fly high, landings, planes, plans, or a skill).
+            var words = text[(training ? 6 : 5)..].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            var minutes = words.Count > 0 && double.TryParse(words[^1], NumberStyles.Float, CultureInfo.InvariantCulture, out var m) ? m : 30;
+            if (words.Count > 0 && double.TryParse(words[^1], NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+                words.RemoveAt(words.Count - 1);
+            var focus = training ? FreeFlight.Focus(string.Join(' ', words)) : null;
+            if (training && focus == null)
+            {
+                Ui.Line("free", "Train what? fast, high, landings, visual, rnav, planes or plans.");
+                continue;
+            }
             freeFlying = true;
             stopFree = false;
-            Ui.Line("free", string.Create(CultureInfo.InvariantCulture, $"Free flight for {Math.Clamp(minutes, 5, 240):0} minutes: practising landings around KSC. Any order stops it."));
+            Ui.Line("free", focus != null
+                ? FormattableString.Invariant($"Free flight for {Math.Clamp(minutes, 5, 240):0} minutes: training {string.Join(", ", focus)} until it's learned ({FreeFlight.LearnedInARow} good in a row). Any order stops it.")
+                : FormattableString.Invariant($"Free flight for {Math.Clamp(minutes, 5, 240):0} minutes: practising landings around KSC. Any order stops it."));
             string done;
             try
             {
-                done = await learner.FreeFlyAsync(minutes, new FreeFlightLimits(), () => stopFree || orders.Reader.Count > 0, quit.Token);
+                done = await learner.FreeFlyAsync(minutes, new FreeFlightLimits(), () => stopFree || orders.Reader.Count > 0, quit.Token, focus);
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {

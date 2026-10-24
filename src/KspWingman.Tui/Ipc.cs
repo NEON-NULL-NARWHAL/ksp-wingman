@@ -37,6 +37,10 @@ public static class Ipc
                 "free" => (from, "/free " + (o["minutes"] is JsonValue mv && mv.TryGetValue<double>(out var minutes) && double.IsFinite(minutes)
                     ? Math.Clamp(minutes, 5, 240).ToString(System.Globalization.CultureInfo.InvariantCulture) : "30")),
                 "stop-free" => (from, "/stop-free"),
+                "train" when o["focus"] is JsonValue fv && fv.TryGetValue<string>(out var focus) && focus.Trim().Length is > 0 and <= 30 =>
+                    (from, "/train " + new string(focus.Where(c => char.IsLetter(c) || c == '-' || c == ' ').ToArray()).Trim() + " " +
+                           (o["minutes"] is JsonValue tv && tv.TryGetValue<double>(out var tm) && double.IsFinite(tm) ? Math.Clamp(tm, 5, 240) : 30)
+                           .ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 _ => null,
             };
         }

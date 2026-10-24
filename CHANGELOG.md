@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.0 (2026-10-24): training and flight plans
+
+### Added
+- **Training on request** (the owner's idea): `/train fast|high|landings|visual|rnav|planes|plans [minutes]`, the
+  `train` tool for the pilot model ("go practise flying high"), `{"type":"train"}` in `--ipc`: free flight on one
+  focus until learned (3 good in a row). New drills: fly fast (220 m/s legs), fly high (6,000 m), different planes.
+  Flight records carry the top speed and height.
+- **Flight plans of its own**: tools `procedures` (LUNA EVO's tower's table) and `file_plan`; in free flight the
+  planner builds a plan from the table (FlightPlan.cs: the table as text, the tower's rules checked before filing).
+  PlannerEval scores plans too (gemma4:e4b 5/5 valid, 4.4 fixes; qwen3:8b 0/5, it wrote essays).
+
+### Fixed (found in the rig)
+- A filed plan's or a direct's route wasn't recognized as one ("Flying FILED ...", "Flying DIRECT ...").
+- Training on one goal still asked the planner to pick it.
+- On a flight where every grade was good the debrief wrote trivial lessons: it's asked for NONE then.
+
 ## 0.8.0 (2026-10-24): runway in sight
 
 ### Added
