@@ -89,6 +89,7 @@ public sealed class Director(string host, int port) : IDisposable
     {
         var runway = landing.Runway;
         _clearance = null;
+        _lastLanding = null; // this landing's numbers only (the flight record waits for them)
         string? said = null;
         Start(link =>
         {

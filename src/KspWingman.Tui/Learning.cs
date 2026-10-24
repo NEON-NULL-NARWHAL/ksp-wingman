@@ -72,7 +72,7 @@ public static partial class Debrief
         "Write ONE new lesson for next time, for the skill that went worst: what to do differently, as advice starting " +
         "with a verb (e.g. \"Slow to 85 m/s before F09 to stop closer to the centerline.\"), 10 to 200 characters, with " +
         "numbers from the record when you can. Don't just repeat what happened, and don't repeat a lesson that's already " +
-        "there. Answer exactly:\n" +
+        "there. SKILL is one of these ids, exactly: " + string.Join(", ", skills.Keys) + ". Answer exactly:\n" +
         "SKILL: <skill id> | LESSON: <sentence>\nIf the flight taught nothing new, answer NONE.";
 
     /// <summary>The planner's answer as (skill, lesson), when it's one of the flight's skills and a sane sentence.</summary>
@@ -81,9 +81,9 @@ public static partial class Debrief
         var m = Line().Match(answer);
         if (!m.Success)
             return null;
-        var skill = m.Groups[1].Value.Trim().ToLowerInvariant();
+        var skill = Skill(m.Groups[1].Value, skills);
         var lesson = m.Groups[2].Value.Trim().Trim('"');
-        if (!skills.Contains(skill) || lesson.Length is < 10 or > 200 || lesson.Contains('\n'))
+        if (skill == null || lesson.Length is < 10 or > 200 || lesson.Contains('\n'))
             return null;
         // Advice, not a report: the rig's first "lesson" was "Landed 25m off centerline at 1021m down runway 09".
         var first = lesson.Split(' ', 2)[0].Trim(',', '.', ':').ToLowerInvariant();
@@ -92,8 +92,26 @@ public static partial class Debrief
         return (skill, lesson);
     }
 
+    /// <summary>
+    /// The flight's skill a model meant: its id, or a name close to one ("Landing", "RNAV Landing", "landing-visual":
+    /// how qwen3:8b and gemma4:e4b wrote them in PlannerEval), when exactly one of the flight's skills fits.
+    /// </summary>
+    internal static string? Skill(string written, IReadOnlyCollection<string> skills)
+    {
+        var w = written.Trim().ToLowerInvariant().Replace(' ', '-');
+        if (skills.Contains(w))
+            return w;
+        bool Fits(string id) =>
+            (w.Contains("visual") && id == "land-visual") || (w.Contains("rnav") && id == "land-rnav") ||
+            (w.StartsWith("land", StringComparison.Ordinal) && !w.Contains("visual") && !w.Contains("rnav") && id.StartsWith("land-", StringComparison.Ordinal)) ||
+            (w.Contains("take") && id == "takeoff") || (w.Contains("hold") && id == "hold") || (w.Contains("sequenc") && id == "sequencing") ||
+            (w.Contains("route") && id == "route");
+        var fits = skills.Where(Fits).ToList();
+        return fits.Count == 1 ? fits[0] : null;
+    }
+
     // The "|" is optional: Qwen3 4B left it out in the rig ("SKILL: land-visual   LESSON: Correct heading 2°...").
-    [GeneratedRegex(@"SKILL:\s*([a-z\-]+)\s*[|,;]?\s*LESSON:\s*([^\r\n]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"SKILL:\s*([a-z][a-z \-]*?)\s*[|,;]?\s*LESSON:\s*([^\r\n]+)", RegexOptions.IgnoreCase)]
     private static partial Regex Line();
 }
 

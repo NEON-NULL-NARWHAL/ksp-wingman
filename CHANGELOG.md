@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1 (2026-10-24)
+
+### Changed
+- Steers back to the centerline twice as hard on the rollout (1° per 5 m off, up to 6°): with LUNA EVO's longer short
+  visual, landings in the rig stopped 10-11 m off the centerline (were 16-23).
+- The debrief accepts a skill written as a name ("RNAV Landing", "Landing"), matched to that flight's own skills, and
+  the prompt lists the skill ids: in the planner eval most lessons were lost to that.
+- A landed flight's record waits up to 5 s for the landing's numbers (a 10 m landing was once recorded without them).
+
+### Added
+- **PlannerEval** (`tests/PlannerEval`): compares planner models on real flight records and free-flight menus through
+  the console's own code, no KSP. First results (2026-10-24, thinking on): gemma4:e4b 6/6 lessons, 3/3 weakest picks,
+  3.1 s mean; qwen3:8b 6/6, 3/3, 28.6 s; qwen3:4b 2/6, 3/3, 14.4 s. gemma4:e4b is the suggested planner.
+
 ## 0.7.0 (2026-10-24): free flight and learning
 
 ### Added

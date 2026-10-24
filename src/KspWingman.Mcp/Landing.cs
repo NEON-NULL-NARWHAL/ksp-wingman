@@ -53,7 +53,9 @@ public sealed class Landing(Runway runway, string? approach = null, Approach? gi
     /// </summary>
     public static (double Steer, double Rudder, bool Brakes) Rollout(double speed, double headingError, double cross, double yawRate = 0)
     {
-        var aim = headingError + Math.Clamp(-cross / 10, -5, 5); // degrees to turn (positive: right)
+        // Back to the centerline harder (2.14): a 1-2° heading error on a 1 km rollout is 17-35 m; at 1° per 10 m off,
+        // the short visual's landings touched down ~11 m off and stopped 16-23 m off in the rig.
+        var aim = headingError + Math.Clamp(-cross / 5, -6, 6); // degrees to turn (positive: right)
         var fade = Math.Clamp((speed - 5) / 15, 0, 1) * Math.Clamp(20 / Math.Max(speed, 1), 0.15, 1);
         var steer = Math.Clamp((-aim / 10 + 0.08 * yawRate) * fade, -0.3, 0.3);
         // The wheel's sign is KSP's (positive steers left); the rudder's is the pilot's (positive yaws right).

@@ -12,5 +12,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/KspWingman.Tests/KspWingman.Tests.csproj" />
     <Project Path="tests/ModelEval/ModelEval.csproj" />
+    <Project Path="tests/PlannerEval/PlannerEval.csproj" />
   </Folder>
 </Solution>

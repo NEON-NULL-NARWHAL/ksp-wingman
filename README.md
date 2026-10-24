@@ -214,6 +214,14 @@ small models along: it reads tool calls they write out as text, and when one say
 dotnet run --project tests/ModelEval -- "C:\path\to\KspWingman.Mcp.exe" <model> [server URL] [runs per order]
 ```
 
+To compare **planner** models (debriefs and free-flight choices, through the console's own code, no KSP): real flight
+records from the rig (or a `knowledge.json` from LUNA EVO's tower) and goal menus, scored on what the console accepts
+and how long each answer takes:
+
+```
+dotnet run --project tests/PlannerEval -- --models qwen3:4b,qwen3:8b,gemma4:e4b [--flights knowledge.json] [--runs 3] [--report report.md]
+```
+
 ## How it works
 
 - **The bridge** (`src/KspWingman.Bridge`, a KSP mod) adds a kRPC service called `Wingman` for what kRPC can't see by

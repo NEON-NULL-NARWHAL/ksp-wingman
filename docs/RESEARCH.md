@@ -83,6 +83,21 @@ docking. LMP already supports a clean hand-off, no protocol change:
 - `.craft` format notes: https://forum.kerbalspaceprogram.com/topic/51800-any-doco-on-the-craft-file-format
 - LMP 0.29.2: `LmpClient/Systems/VesselLockSys/VesselLockEvents.cs`, `LmpClient/Systems/Lock/LockSystem.cs`.
 
+## Planner eval, measured (2026-10-24)
+
+`tests/PlannerEval`, the rig's six flight records as debriefs plus three free-flight menus, thinking on, Ollama 0.40.9 on
+the RX 9070 XT. Lessons accepted by the console's own checks / weakest goal picked / mean and slowest answer:
+
+| Model | Lessons | Weakest picked | Mean | Slowest | Notes |
+|---|---|---|---|---|---|
+| gemma4:e4b | 6/6 | 3/3 | 3.1 s | 5 s | General but correct advice. Next to two running KSPs Ollama holds only 0.4 GB of it on the card (E4B keeps most weights off the GPU) and it still answered in 4.3 s |
+| qwen3:8b | 6/6 | 3/3 | 28.6 s | 200 s | More specific, but mistakes runway "09" for a heading ("Correct heading to 09°") |
+| qwen3:4b | 2/6 | 3/3 | 14.4 s | 29 s | Often writes the analysis instead of the answer line |
+
+Before the prompt listed the skill ids (and the debrief matched names to them), the same models scored 3/6, 4/6, 0/6:
+they wrote "Landing" or "RNAV Landing". `qwen3:4b-thinking` on Ollama is the same model as `qwen3:4b`.
+Next: Gemma 4 E4B as the pilot too (one model), and bigger planners on the owner's cluster with PlannerEval first.
+
 ## Gemma 4 E4B as one model that plans and flies (to test, 2026-10-23)
 
 Why it's interesting: one small model doing both roles (thinking planner and fast pilot) would keep the console simple

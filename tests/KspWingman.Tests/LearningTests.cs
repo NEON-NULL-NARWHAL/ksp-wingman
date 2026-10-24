@@ -17,6 +17,11 @@ public sealed class LearningTests
         Assert.Equal(("land-rnav", "On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around."),
             Debrief.Parse("<think>hmm</think>SKILL: land-rnav | LESSON: On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around.", skills));
         Assert.Null(Debrief.Parse("NONE", skills));
+        // Skill names instead of ids (PlannerEval: qwen3:8b, gemma4:e4b), mapped only onto the flight's own skills.
+        Assert.Equal("land-rnav", Debrief.Parse("SKILL: RNAV Landing | LESSON: Correct heading to within 2° before F09.", skills)?.Skill);
+        Assert.Equal("land-rnav", Debrief.Parse("SKILL: Landing | LESSON: Correct lateral drift earlier to stop on the centerline.", skills)?.Skill);
+        Assert.Null(Debrief.Parse("SKILL: landing-visual | LESSON: Correct lateral drift earlier to stop on the centerline.", skills)); // not this flight's
+        Assert.Contains("ids, exactly: takeoff, land-rnav", Debrief.Prompt("Flight landed.", new Dictionary<string, bool> { ["takeoff"] = true, ["land-rnav"] = false }, ""));
         Assert.Equal("land-rnav", Debrief.Parse("SKILL: land-rnav   LESSON: Correct heading 2° toward centerline to land within 15 m.", skills)?.Skill); // no "|" (the rig's)
         Assert.Null(Debrief.Parse("SKILL: hold | LESSON: Hold tighter at KSC-HS next time.", skills)); // not a skill it used
         Assert.Null(Debrief.Parse("SKILL: land-rnav | LESSON: short", skills));

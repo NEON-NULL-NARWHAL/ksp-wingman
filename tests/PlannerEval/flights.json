@@ -1,0 +1,186 @@
+{
+ "source": "KSP Wingman rig, 2026-10-24 (two agents, LUNA EVO's tower)",
+ "flights": [
+  {
+   "id": 1,
+   "callSign": "RigPilot",
+   "result": "landed",
+   "approach": "RNAV 09 STRAIGHT-IN",
+   "goArounds": 0,
+   "minutes": 5.9,
+   "downRunway": 1021,
+   "offCenterline": 25,
+   "headingError": 4,
+   "phases": [
+    "Parked",
+    "TakingOff",
+    "Climbing",
+    "OnRoute",
+    "OnFinal",
+    "Flaring",
+    "RollingOut",
+    "Flaring",
+    "RollingOut",
+    "Stopped"
+   ],
+   "skills": {
+    "takeoff": true,
+    "route": true,
+    "land-rnav": false
+   }
+  },
+  {
+   "id": 2,
+   "callSign": "RigPilot",
+   "result": "landed",
+   "approach": "RNAV 09 STRAIGHT-IN",
+   "goArounds": 0,
+   "minutes": 6,
+   "downRunway": 1077,
+   "offCenterline": 7,
+   "headingError": 1,
+   "phases": [
+    "Parked",
+    "TakingOff",
+    "Climbing",
+    "OnRoute",
+    "OnFinal",
+    "Flaring",
+    "RollingOut",
+    "Stopped"
+   ],
+   "skills": {
+    "takeoff": true,
+    "route": true,
+    "land-rnav": true
+   }
+  },
+  {
+   "id": 3,
+   "callSign": "RigViewer",
+   "result": "landed",
+   "approach": "RNAV 09 STRAIGHT-IN",
+   "goArounds": 0,
+   "minutes": 12.9,
+   "downRunway": 1123,
+   "offCenterline": 9,
+   "headingError": 1,
+   "phases": [
+    "Parked",
+    "TakingOff",
+    "Climbing",
+    "Holding",
+    "OnRoute",
+    "OnFinal",
+    "Flaring",
+    "RollingOut",
+    "Flaring",
+    "RollingOut",
+    "Taxiing",
+    "Stopped"
+   ],
+   "skills": {
+    "takeoff": true,
+    "route": true,
+    "hold": true,
+    "land-rnav": true,
+    "sequencing": true
+   }
+  },
+  {
+   "id": 4,
+   "callSign": "RigPilot",
+   "result": "landed",
+   "approach": "VISUAL 09",
+   "goArounds": 0,
+   "minutes": 4.9,
+   "downRunway": 1008,
+   "offCenterline": 23,
+   "headingError": 2,
+   "phases": [
+    "Parked",
+    "TakingOff",
+    "Climbing",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "OnFinal",
+    "Flaring",
+    "RollingOut",
+    "Stopped"
+   ],
+   "skills": {
+    "takeoff": true,
+    "land-visual": false
+   }
+  },
+  {
+   "id": 5,
+   "callSign": "RigViewer",
+   "result": "landed",
+   "approach": "VISUAL 09",
+   "goArounds": 0,
+   "minutes": 9.9,
+   "downRunway": 1188,
+   "offCenterline": 22,
+   "headingError": 3,
+   "phases": [
+    "TakingOff",
+    "Parked",
+    "TakingOff",
+    "Climbing",
+    "Holding",
+    "Descending",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "OnFinal",
+    "Flaring",
+    "RollingOut",
+    "Stopped"
+   ],
+   "skills": {
+    "takeoff": true,
+    "hold": true,
+    "land-visual": false
+   }
+  },
+  {
+   "id": 6,
+   "callSign": "RigPilot",
+   "result": "landed",
+   "approach": "VISUAL 09",
+   "goArounds": 0,
+   "minutes": 9.4,
+   "downRunway": 1142,
+   "offCenterline": 16,
+   "headingError": 1,
+   "phases": [
+    "Stopped",
+    "Climbing",
+    "Holding",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "Descending",
+    "Cruising",
+    "OnFinal",
+    "Flaring",
+    "RollingOut",
+    "Stopped"
+   ],
+   "skills": {
+    "hold": true,
+    "land-visual": false
+   }
+  }
+ ]
+}

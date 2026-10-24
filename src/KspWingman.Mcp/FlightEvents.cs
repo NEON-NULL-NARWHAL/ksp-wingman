@@ -79,6 +79,7 @@ public sealed class FlightWatch : IDisposable
     private readonly FlightEvents _events;
     private readonly PhaseTracker _tracker = new();
     private string? _craft;
+    private (FlightOutcome Outcome, DateTime Since)? _waiting;
     private readonly CancellationTokenSource _stop = new();
 
     public FlightWatch(string host, int port, Director director, FlightEvents events)
@@ -112,7 +113,19 @@ public sealed class FlightWatch : IDisposable
                 {
                     _events.Add("phase", $"{change.From} → {change.To}", new { from = change.From.ToString(), to = change.To.ToString() });
                     if (change.Outcome is { } o)
-                        _events.Add("outcome", Describe(o), o with { Craft = _craft });
+                        _waiting = (o with { Craft = _craft }, DateTime.UtcNow);
+                }
+                // A landing's numbers come from the pilot's rollout, which can finish a moment after this watch sees the
+                // plane stopped (the rig: a 10 m landing recorded without them, so graded as not good). Wait for them, 5 s.
+                if (_waiting is { } w)
+                {
+                    var landing = w.Outcome.Landing ?? (w.Outcome.Result == "landed" ? _director.LastLanding : null);
+                    if (landing != null || w.Outcome.Result != "landed" || DateTime.UtcNow - w.Since > TimeSpan.FromSeconds(5))
+                    {
+                        var o = w.Outcome with { Landing = landing };
+                        _events.Add("outcome", Describe(o), o);
+                        _waiting = null;
+                    }
                 }
             }
             catch (Exception e) when (e is WingmanException or IOException or System.InvalidOperationException)
