@@ -19,6 +19,102 @@ public sealed class Director(string host, int port) : IDisposable
     private volatile string _doing = "Not flying anything.";
     private volatile string? _problem;
 
+    /// <summary>The plane being flown and its own numbers (Handling.cs): set at launch, and by a flight test.</summary>
+    public PlaneSetup Setup { get; private set; } = PlaneSetup.Default;
+
+    public string? Craft { get; private set; }
+
+    private readonly List<FinalReport> _finals = [];
+
+    /// <summary>How this flight's finals went (weaving, height 1 km out), for its outcome.</summary>
+    public IReadOnlyList<FinalReport> Finals { get { lock (_finals) return _finals.ToList(); } }
+
+    /// <summary>
+    /// The plane's name for a vessel (localized first, FlightTools.Localized): the craft launched, when the vessel is
+    /// it. KSP names stock craft by their translation key ("#autoLOC_501174" for the Aeris 3A), which made every rig
+    /// flight until 0.11 a plane called that.
+    /// </summary>
+    public string CraftOf(string vesselName) =>
+        Craft != null && (vesselName.StartsWith("#autoLOC", StringComparison.Ordinal) || vesselName.Equals(Craft, StringComparison.OrdinalIgnoreCase))
+            ? Craft
+            : vesselName;
+
+    /// <summary>A new plane on the runway: its setup, and a clean slate for its finals.</summary>
+    public void NewFlight(string craft, PlaneSetup setup)
+    {
+        (Craft, Setup, Ground) = (craft, setup, null);
+        lock (_finals)
+            _finals.Clear();
+    }
+
+    /// <summary>This flight's ground test, until the flight test in the air sends it with its own numbers.</summary>
+    public GroundResult? Ground { get; private set; }
+
+    /// <summary>
+    /// The ground test on the runway (GroundTest), stopped with the brakes on afterwards. Its nose wheel gain is used
+    /// from then on (take_off, the rollout, taxiing). <paramref name="done"/> gets it once finished.
+    /// </summary>
+    public void TestGround(GroundTest test, Action<GroundTest> done)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var staged = false;
+        Start(_ => null, $"Ground test of the {test.Craft}: starting.", (link, vessel) =>
+        {
+            var g = link.Run(_ => vessel.Flight(vessel.Orbit.Body.ReferenceFrame));
+            var (speed, heading) = (link.Run(_ => g.Speed), link.Run(_ => vessel.Flight(vessel.SurfaceReferenceFrame).Heading));
+            var command = test.Next(heading, speed, clock.Elapsed.TotalSeconds);
+            link.Run(_ =>
+            {
+                var c = vessel.Control;
+                if (!staged)
+                {
+                    staged = true;
+                    c.SAS = true; // wings level while rolling, as take_off does
+                    if (c.CurrentStage > 0 && vessel.Thrust < 1)
+                        c.ActivateNextStage();
+                }
+                c.Throttle = (float)command.Throttle;
+                c.WheelSteering = (float)command.Steer;
+                c.Brakes = command.Brakes;
+                return 0;
+            });
+            _doing = command.Doing;
+            if (!test.Finished)
+                return false;
+            if (test.Result is { } r)
+            {
+                Ground = r;
+                Setup = Setup.WithGround(r);
+            }
+            done(test);
+            return true;
+        });
+    }
+
+    /// <summary>The setup changed mid-flight (a flight test just measured the plane): the pilot uses it from the next mode.</summary>
+    public void Use(PlaneSetup setup) => Setup = setup;
+
+    /// <summary>
+    /// Flies a flight test (FlightTest) and then holds level where it ended. <paramref name="done"/> gets the test once
+    /// it's finished (done or stopped), from the flight loop's thread.
+    /// </summary>
+    public void Test(FlightTest test, Action<FlightTest> done)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var reported = false;
+        StartSteer((_, state, last) =>
+        {
+            var command = test.Next(state, clock.Elapsed.TotalSeconds, last);
+            _doing = command.Doing;
+            if (test.Finished && !reported)
+            {
+                reported = true;
+                done(test);
+            }
+            return command;
+        }, $"Flight test of the {test.Craft}: starting.");
+    }
+
     /// <summary>What the loop is doing right now (or why it stopped), for status.</summary>
     public string Doing => _problem is { } p ? "Stopped: " + p : _doing;
 
@@ -66,10 +162,10 @@ public sealed class Director(string host, int port) : IDisposable
     /// Lands on a runway (from anywhere in the air), rolls out and stops with the brakes on. <paramref name="approach"/>:
     /// null for the tower's pick, "visual", or an approach's name. The tower's clearance shows up in Clearance.
     /// </summary>
-    public void Land(Runway runway, string? approach = null) => Land(new Landing(runway, approach));
+    public void Land(Runway runway, string? approach = null) => Land(new Landing(runway, approach, setup: Setup));
 
     /// <summary>Lands on a route a tower sent (its fixes, then the final).</summary>
-    public void Land(Runway runway, Approach route) => Land(new Landing(runway, given: route));
+    public void Land(Runway runway, Approach route) => Land(new Landing(runway, given: route, setup: Setup));
 
     /// <summary>Holds: right-hand circles around a point at an altitude, until told otherwise (a tower's hold).</summary>
     public void HoldAt(Geo center, double radius, string fix)
@@ -90,6 +186,10 @@ public sealed class Director(string host, int port) : IDisposable
         var runway = landing.Runway;
         _clearance = null;
         _lastLanding = null; // this landing's numbers only (the flight record waits for them)
+        _touchAndGo = false;
+        _touchedDown = false;
+        _yawRate = 0;
+        landing.FinalEnded = report => { lock (_finals) _finals.Add(report); };
         string? said = null;
         Start(link =>
         {
@@ -100,6 +200,8 @@ public sealed class Director(string host, int port) : IDisposable
             var step = landing.Step(radius, me, link.Run(_ => f.Heading), link.Run(_ => g.Speed), link.Run(_ => g.SurfaceAltitude), onGround: false);
             if (step.Phase is LandingPhase.Final or LandingPhase.Flare)
                 link.Run(_ => { if (!vessel.Control.Gear) vessel.Control.Gear = true; return 0; });
+            else if (step.Phase == LandingPhase.GoAround && link.Run(_ => g.SurfaceAltitude) > 30)
+                link.Run(_ => { if (vessel.Control.Gear) vessel.Control.Gear = false; return 0; }); // less drag on the climb
             _doing = step.Doing;
             _approach = landing.Approach?.Name ?? "visual";
             if (landing.Approach is { } flying && flying.Name != said)
@@ -126,6 +228,7 @@ public sealed class Director(string host, int port) : IDisposable
             var (_, cross) = frame.RunwayFrame(link.Run(_ => vessel.Orbit.Body.EquatorialRadius), me);
             var (speed, heading) = (link.Run(_ => g.Speed), link.Run(_ => f.Heading));
             var (steer, throttle, brakes, done) = Taxi.Step(runway.Heading, heading, cross, speed);
+            steer = Math.Clamp(steer * Setup.SteerGain, -0.5, 0.5); // this plane's nose wheel (its ground test)
             var timedOut = DateTime.UtcNow - started > Taxi.MaxTime;
             link.Run(_ =>
             {
@@ -152,6 +255,12 @@ public sealed class Director(string host, int port) : IDisposable
     private volatile LandingResult? _lastLanding;
 
     private (DateTime Time, double Heading)? _rolloutLast;
+    private bool _touchAndGo;
+    private double _yawRate;
+    private volatile bool _touchedDown;
+
+    /// <summary>After touchdown, "flying" lower than this (m) is a bounce, still the rollout.</summary>
+    public const double BounceHeight = 4;
 
     /// <summary>The tower's last clearance for the current landing (null: none yet, or a visual approach).</summary>
     public string? Clearance => _clearance;
@@ -169,7 +278,11 @@ public sealed class Director(string host, int port) : IDisposable
     }
 
     /// <param name="groundStep">On the ground: what to do (the rollout, a taxi); true once done. Null: the pilot only flies.</param>
-    private void Start(Func<KrpcLink, PlaneTarget?> target, string doing, Func<KrpcLink, Vessel, bool>? groundStep = null)
+    private void Start(Func<KrpcLink, PlaneTarget?> target, string doing, Func<KrpcLink, Vessel, bool>? groundStep = null) =>
+        StartSteer((link, _, _) => new TestCommand(target(link), null, ""), doing, groundStep);
+
+    /// <summary>Like Start, but the step sees the plane's numbers and the last inputs, and may set the stick itself.</summary>
+    private void StartSteer(Func<KrpcLink, PlaneState, PlaneInputs, TestCommand> steer, string doing, Func<KrpcLink, Vessel, bool>? groundStep = null)
     {
         Stop();
         CancellationTokenSource stop;
@@ -185,7 +298,7 @@ public sealed class Director(string host, int port) : IDisposable
         {
             try
             {
-                await Fly(link, target, groundStep, stop.Token);
+                await Fly(link, steer, groundStep, stop.Token);
                 lock (_gate)
                 {
                     if (_stop == stop)
@@ -207,15 +320,16 @@ public sealed class Director(string host, int port) : IDisposable
         });
     }
 
-    private async Task Fly(KrpcLink link, Func<KrpcLink, PlaneTarget?> target, Func<KrpcLink, Vessel, bool>? groundStep, CancellationToken stop)
+    private async Task Fly(KrpcLink link, Func<KrpcLink, PlaneState, PlaneInputs, TestCommand> steer, Func<KrpcLink, Vessel, bool>? groundStep, CancellationToken stop)
     {
         var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
         var control = link.Run(_ => vessel.Control);
         var ground = link.Run(_ => vessel.Orbit.Body.ReferenceFrame);
         var surface = link.Run(_ => vessel.SurfaceReferenceFrame);
         link.Run(_ => { vessel.AutoPilot.Engaged = false; control.SAS = false; return 0; });
-        var pilot = new Pilot();
+        var pilot = new Pilot(Setup);
         var last = DateTime.UtcNow;
+        var lastInputs = new PlaneInputs(0, 0, 0, (float)Setup.CruiseThrottle);
         var ticks = 0;
         while (!stop.IsCancellationRequested)
         {
@@ -228,7 +342,11 @@ public sealed class Director(string host, int port) : IDisposable
                 link.Run(_ => { if (control.SAS) control.SAS = false; if (vessel.AutoPilot.Engaged) vessel.AutoPilot.Engaged = false; return 0; });
             }
             var situation = link.Run(_ => vessel.Situation);
-            if (situation == VesselSituation.Landed && groundStep != null)
+            // A bounce after touchdown is still the rollout: the rig's Aeris 4A hopped 2 m up at 58 m/s, below its stall,
+            // and the landing, seeing it "flying" 71 m off the centerline, sent it around into the ground.
+            var bouncing = situation == VesselSituation.Flying && _touchedDown && !_touchAndGo &&
+                           link.Run(_ => vessel.Flight(ground).SurfaceAltitude) < BounceHeight;
+            if ((situation is VesselSituation.Landed or VesselSituation.PreLaunch || bouncing) && groundStep != null)
             {
                 if (groundStep(link, vessel))
                     return;
@@ -239,11 +357,15 @@ public sealed class Director(string host, int port) : IDisposable
                 throw new WingmanException($"the vessel is {situation.ToString().ToLowerInvariant()}: the pilot flies in the air only.");
             var (f, g) = link.Run(_ => (vessel.Flight(surface), vessel.Flight(ground)));
             var state = link.Run(_ => new PlaneState(f.Pitch, f.Roll, f.Heading, g.VerticalSpeed, g.MeanAltitude, g.Speed, g.SurfaceAltitude));
-            if (target(link) is { } t)
+            var command = steer(link, state, lastInputs);
+            if (command.Target != null || command.Inputs != null)
             {
                 var now = DateTime.UtcNow;
-                var inputs = pilot.Step(state, t, (now - last).TotalSeconds);
+                // The pilot steps even while a flight test holds the stick, so its rates are current when it takes over.
+                var flown = pilot.Step(state, command.Target ?? new PlaneTarget(state.Heading, state.Altitude, state.Speed), (now - last).TotalSeconds);
                 last = now;
+                var inputs = command.Inputs ?? flown;
+                lastInputs = inputs;
                 link.Run(_ => { control.Pitch = inputs.Pitch; control.Roll = inputs.Roll; control.Yaw = inputs.Yaw; control.Throttle = inputs.Throttle; return 0; });
             }
             await Task.Delay(50, stop);
@@ -264,23 +386,34 @@ public sealed class Director(string host, int port) : IDisposable
         // Wheel steering uses KSP's sign (positive steers left), the opposite of the rudder's.
         var heading = link.Run(_ => f.Heading);
         var now = DateTime.UtcNow;
-        var yawRate = _rolloutLast is { } last && (now - last.Time).TotalSeconds > 0.01
+        var rawYaw = _rolloutLast is { } last && (now - last.Time).TotalSeconds > 0.01
             ? Pilot.Wrap(heading - last.Heading) / (now - last.Time).TotalSeconds : 0;
         _rolloutLast = (now, heading);
-        var (steer, rudder, brakes) = Landing.Rollout(speed, headingError, step.Cross, yawRate);
+        // Smoothed: from 20 readings a second it's noisy, and the fast brakes wait for a steady nose.
+        _yawRate += 0.3 * (rawYaw - _yawRate);
+        var yawRate = _yawRate;
+        _touchedDown = true;
+        var remaining = landing.Runway.Length - Landing.TouchdownAfterThreshold - step.Along;
+        var (steer, rudder, brakes) = Landing.Rollout(speed, headingError, step.Cross, yawRate, remaining, Setup.Braking);
+        steer = Math.Clamp(steer * Setup.SteerGain, -0.3, 0.3); // this plane's nose wheel (its ground test)
+        // Too fast to stop in what's left: off again (once decided, it stays decided; airborne, the landing goes around).
+        _touchAndGo |= Landing.TouchAndGo(speed, remaining, Setup.Braking, Setup.RotateSpeed);
+        brakes &= !_touchAndGo;
         var roll = link.Run(_ => f.Roll);
         link.Run(_ =>
         {
             var c = vessel.Control;
-            c.Throttle = 0;
-            c.Pitch = 0;
+            c.Throttle = _touchAndGo ? 1 : 0;
+            c.Pitch = _touchAndGo ? 0.3f : 0;
             c.Yaw = (float)rudder;
             c.Roll = (float)Math.Clamp(-0.01 * roll, -0.2, 0.2);
             c.WheelSteering = (float)steer;
             c.Brakes = brakes;
             return 0;
         });
-        _doing = step.Doing;
+        _doing = _touchAndGo
+            ? string.Create(CultureInfo.InvariantCulture, $"Going around from the runway: {speed:0} m/s with {remaining:0} m left, too fast to stop.")
+            : step.Doing;
         if (speed > 1)
             return false;
         link.Run(_ => { vessel.Control.Brakes = true; vessel.Control.WheelSteering = 0; return 0; });

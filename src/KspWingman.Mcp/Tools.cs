@@ -42,6 +42,8 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
             }
         }
         text.AppendLine("Pilot: " + director.Doing);
+        if (director.Craft != null)
+            text.AppendLine($"Setup for the {director.Craft}: {director.Setup.Describe()}");
         if (tower.Client?.Heard is { Count: > 0 } heard)
             text.AppendLine("Tower: " + heard[^1]);
         else if (director.Active && director.Clearance is { } clearance)
@@ -165,6 +167,8 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
                 text.AppendLine(string.Create(CultureInfo.InvariantCulture,
                     $"- {Str(c["name"])}: {Int(c["flights"])} flight(s), {Int(c["landed"])} landed, {Int(c["crashed"])} crashed, fastest {Num(c["topSpeed"]):0} m/s, highest {Num(c["topHeight"]):0} m") +
                     ((c["toLearn"] as System.Text.Json.Nodes.JsonArray) is { Count: > 0 } open ? "; still to learn: " + string.Join(", ", open.Select(Str)) : ""));
+                if (Str(c["test"]) is { Length: > 0 } test)
+                    text.AppendLine($"   flight test: {test}");
                 foreach (var n in (c["notes"] as System.Text.Json.Nodes.JsonArray ?? []).Select(Str))
                     text.AppendLine($"   - {n}");
             }

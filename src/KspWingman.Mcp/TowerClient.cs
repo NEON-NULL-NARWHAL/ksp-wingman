@@ -33,6 +33,10 @@ public sealed class TowerClient : IDisposable
     private bool _calledSight;
     private bool _calledGoAround;
     private Approach? _pending; // a clearance that came in during a go-around's climb-out
+    private (Geo Center, double Radius, string Fix)? _pendingHold; // a hold, likewise
+
+    /// <summary>Going around (from the air, or from the runway) and still under 300 m: new orders wait.</summary>
+    private bool ClimbingOut => _director.Doing.Contains("oing around", StringComparison.Ordinal);
 
     private readonly FlightEvents? _events;
 
@@ -84,6 +88,9 @@ public sealed class TowerClient : IDisposable
         _callSign ??= _link.Wingman<string>("PlayerName");
         var report = _link.Run(c =>
         {
+            // Out of the LMP server (its player left): out of the tower's sequence too.
+            if (!_link.Wingman<bool>("InGame"))
+                return new JsonObject { ["callSign"] = _callSign, ["latitude"] = 0, ["longitude"] = 0, ["situation"] = "Offline" };
             if (c.KRPC().GameScene != GameScene.Flight)
                 return new JsonObject { ["callSign"] = _callSign, ["latitude"] = 0, ["longitude"] = 0, ["situation"] = "SpaceCenter" };
             var v = c.SpaceCenter().ActiveVessel;
@@ -101,8 +108,14 @@ public sealed class TowerClient : IDisposable
                 ["speed"] = g.Speed,
                 ["situation"] = v.Situation.ToString(),
                 ["phase"] = _director.Doing,
+                ["approachSpeed"] = _director.Setup.ApproachSpeed, // a fast plane gets the long approaches (MC 2.17)
             };
         });
+        // A plane that's gone (crashed, in the sea, recovered, out of the server) or a fresh one on the runway hasn't asked
+        // to land: in the rig a new Albatross was put in the hold before it took off, from the last plane's request.
+        if (report["situation"] is JsonValue sv && sv.TryGetValue<string>(out var situation) &&
+            situation is "SpaceCenter" or "Destroyed" or "Splashed" or "Offline" or "PreLaunch")
+            (_wantsToLand, _calledSight, _calledGoAround, _pending, _pendingHold) = (false, false, false, null, null);
         await Handle(await PostAsync("v1/report", report));
         // Going around: tell the tower, once; it resequences (a hold with traffic, or the short visual at once). A new
         // route waits until the climb-out is through 300 m, so it never turns onto it just off the ground.
@@ -111,10 +124,14 @@ public sealed class TowerClient : IDisposable
             _calledGoAround = true;
             await SayAsync("go-around", "going around");
         }
-        if (_pending is { } waiting && _link.Run(c => c.SpaceCenter().ActiveVessel is var v && v.Flight(v.Orbit.Body.ReferenceFrame).SurfaceAltitude > 300))
+        if ((_pending != null || _pendingHold != null) && _link.Run(c => c.SpaceCenter().ActiveVessel is var v && v.Flight(v.Orbit.Body.ReferenceFrame).SurfaceAltitude > 300))
         {
-            _pending = null;
-            _director.Land(Runway.Ksc, waiting);
+            _calledGoAround = false;
+            if (_pending is { } waiting)
+                _director.Land(Runway.Ksc, waiting);
+            else if (_pendingHold is { } h)
+                _director.HoldAt(h.Center, h.Radius, h.Fix);
+            (_pending, _pendingHold) = (null, null);
         }
         // On final and lined up: "runway in sight", once an approach; the tower answers with the landing clearance.
         if (!_calledSight && _director.Doing.StartsWith("Landing, on final", StringComparison.Ordinal) && LinedUp(_director.Doing))
@@ -194,6 +211,41 @@ public sealed class TowerClient : IDisposable
         return "The tower refused the lesson: " + (answer?["error"] is JsonValue e && e.TryGetValue<string>(out var why) ? why : "no answer");
     }
 
+    /// <summary>Sends a flight test's numbers to the tower (Mission Control 2.17+), for every agent's setup of that plane.</summary>
+    public async Task RecordTestAsync(PlaneTest test)
+    {
+        _callSign ??= _link.Wingman<string>("PlayerName");
+        var body = (JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(test, Web)!;
+        body["callSign"] = _callSign;
+        await PostRawAsync("v1/test", body);
+    }
+
+    /// <summary>What the tower knows about a plane: its latest flight test (null: none, or an older tower) and its last finals.</summary>
+    public async Task<(PlaneTest? Test, IReadOnlyList<FinalReport> Finals)> CraftAsync(string craft)
+    {
+        _callSign ??= _link.Wingman<string>("PlayerName");
+        var answer = await PostRawAsync("v1/craft", new JsonObject { ["callSign"] = _callSign, ["craft"] = craft });
+        return (ParseTest(answer?["test"], craft), ParseFinals(answer?["finals"]));
+    }
+
+    /// <summary>A flight test in the tower's answer, checked number by number (anything odd: no test).</summary>
+    public static PlaneTest? ParseTest(JsonNode? node, string craft)
+    {
+        if (node is not JsonObject o)
+            return null;
+        double? N(string name, double max) => o[name] is JsonValue v && v.TryGetValue<double>(out var d) && double.IsFinite(d) && d >= 0 && d <= max ? d : null;
+        if (N("pitchRate", 2000) is not { } pitch || N("rollRate", 5000) is not { } roll || N("minSpeed", 1000) is not { } min)
+            return null;
+        var drift = o["drift"] is JsonValue dv && dv.TryGetValue<double>(out var dd) && double.IsFinite(dd) ? Math.Clamp(dd, -100, 100) : 0;
+        return new PlaneTest(craft, pitch, roll, N("turnRate", 100) ?? 0, min, N("deceleration", 100) ?? 1, N("acceleration", 100) ?? 1, N("cruiseThrottle", 1) ?? 0.2,
+            N("steerRate", 1000) ?? 0, drift, N("braking", 100) ?? 0);
+    }
+
+    public static IReadOnlyList<FinalReport> ParseFinals(JsonNode? node) => (node as JsonArray ?? []).OfType<JsonObject>().Take(20)
+        .Select(f => new FinalReport(
+            f["weaves"] is JsonValue w && w.TryGetValue<int>(out var wi) ? Math.Clamp(wi, 0, 100) : 0,
+            f["high"] is JsonValue h && h.TryGetValue<double>(out var hd) && double.IsFinite(hd) ? Math.Clamp(hd, -10_000, 10_000) : 0)).ToList();
+
     private async Task<JsonNode?> PostRawAsync(string path, JsonObject body)
     {
         using var response = await _http.PostAsJsonAsync(new Uri(_tower, path), body);
@@ -231,15 +283,25 @@ public sealed class TowerClient : IDisposable
                     break;
                 case "clearance" when Route(m["route"]) is { } approach:
                     _calledSight = false;
-                    _calledGoAround = false;
-                    if (_director.Doing.StartsWith("Going around: climbing out", StringComparison.Ordinal))
-                        _pending = approach; // flown once it's through 300 m
+                    // Held while it climbs out, and the go-around stays reported until it's flown: resetting it here
+                    // made the rig's Aeris 4A report the same go-around every 2-4 s until 300 m (and the tower answer each).
+                    if (ClimbingOut)
+                        (_pending, _pendingHold) = (approach, null); // flown once it's through 300 m
                     else
+                    {
+                        _calledGoAround = false;
                         _director.Land(Runway.Ksc, approach);
+                    }
                     break;
                 case "hold" when Hold(m["hold"]) is { } hold:
-                    _calledGoAround = false;
-                    _director.HoldAt(hold.Center, hold.Radius, hold.Fix);
+                    // Held during the climb-out too: the rig's Aeris 4A, off the runway at 69 m, turned for the hold and crashed.
+                    if (ClimbingOut)
+                        (_pendingHold, _pending) = ((hold.Center, hold.Radius, hold.Fix), null);
+                    else
+                    {
+                        _calledGoAround = false;
+                        _director.HoldAt(hold.Center, hold.Radius, hold.Fix);
+                    }
                     break;
                 case "clearance" or "hold":
                     lock (_heard)
@@ -260,7 +322,8 @@ public sealed class TowerClient : IDisposable
     private string Intent()
     {
         var doing = _director.Doing;
-        if (_wantsToLand || doing.StartsWith("Landing", StringComparison.Ordinal) || doing.StartsWith("Holding", StringComparison.Ordinal))
+        // "Holding at" a tower's hold (not the pilot's "Holding heading ...", which is just cruising).
+        if (_wantsToLand || doing.StartsWith("Landing", StringComparison.Ordinal) || doing.StartsWith("Holding at", StringComparison.Ordinal))
             return "land at KSC";
         return _director.Active ? "local flight: " + doing : "on the ground";
     }
@@ -335,6 +398,18 @@ public sealed class TowerClient : IDisposable
     public void Dispose()
     {
         _stop.Cancel();
+        // The agent is stopping: the tower takes it out of the sequence now, not after its 60 s timeout.
+        if (_callSign != null)
+        {
+            try
+            {
+                PostAsync("v1/say", new JsonObject { ["callSign"] = _callSign, ["kind"] = "leaving", ["text"] = "leaving the channel" }).Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception e) when (e is AggregateException or HttpRequestException or TaskCanceledException or ObjectDisposedException)
+            {
+                // No tower: nothing to tell.
+            }
+        }
         _http.Dispose();
         _link.Dispose();
     }

@@ -134,3 +134,19 @@ https://www.lmstudio.ai/models/google/gemma-4-e4b, https://skills.cat/skills/luc
 
 Sources: https://ai.google.dev/gemma/docs/core, https://www.yottalabs.ai/post/gemma-4-hardware-requirements-gpu-memory-2026,
 https://modelfit.io/blog/gemma-4-gpu-requirements/, https://runaihome.com/blog/gemma-4-local-ai-gpu-guide-2026/
+
+## Flight tests in the rig (2026-10-24, 0.11)
+
+Measured with `FlightLab <port> test` / `ground` and the agents' `test_plane` in the rig (stock planes, KSP 1.12.5):
+
+| Plane | Pitch °/s | Roll °/s | Turn °/s at 30° | Slowest m/s | Slows at idle m/s² | Nose wheel °/s | Brakes m/s² |
+|---|---|---|---|---|---|---|---|
+| Aeris 3A (twice) | 55 | 408 | 2.2 | 54 | 1.2 | 25-27 | 9.0-9.2 |
+| Aeris 4A | 37 | 219 | 2.1 | 74 | 1.8 | 19.6-21.6 | 8.7 |
+
+- The first reference, guessed from an old probe note (18 °/s pitch, 160 roll), was 3× off: the tests replaced it.
+- From the Aeris 3A's slowest speed the setup gives landing 73 m/s and rotate 54 m/s; the hand-tuned values were 75 and
+  55. The Aeris 4A's 74 m/s explains its crashes: the Aeris's 75 m/s landing speed was its stall.
+- The nose wheel bites less the faster it rolls (14.9 °/s at 18 m/s, 26.6 at 13), so the ground test holds taxi speed.
+- Undamped, take_off's nose-wheel steering swung the Aeris 3A ±10° for 12 s after a pulse; with turn-rate damping it
+  settled in 4.6 s.

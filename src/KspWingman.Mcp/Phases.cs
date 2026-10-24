@@ -37,8 +37,10 @@ public readonly record struct PhaseChange(Phase From, Phase To, FlightOutcome? O
 /// <param name="Phases">The phases it went through, in order (the knowledge store grades skills from them).</param>
 /// <param name="Craft">The vessel's name.</param>
 /// <param name="MaxSpeed">The fastest it flew (m/s), and <paramref name="MaxHeight"/> the highest above the ground (m).</param>
+/// <param name="Finals">How each final went (weaving, height 1 km out), from the pilot.</param>
 public sealed record FlightOutcome(string Result, double Minutes, int GoArounds, string? Approach, LandingResult? Landing,
-    IReadOnlyList<string>? Phases = null, string? Craft = null, double MaxSpeed = 0, double MaxHeight = 0);
+    IReadOnlyList<string>? Phases = null, string? Craft = null, double MaxSpeed = 0, double MaxHeight = 0,
+    IReadOnlyList<FinalReport>? Finals = null);
 
 /// <summary>Where a landing stopped: meters down the runway from the threshold, off the centerline, and the heading error.</summary>
 public sealed record LandingResult(string Runway, double DownRunway, double OffCenterline, double HeadingError);

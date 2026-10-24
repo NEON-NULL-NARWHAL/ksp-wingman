@@ -44,6 +44,12 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             return false;
         }
         var aboutPlane = Debrief.AboutPlane(answer);
+        // A note about the plane quotes only what was measured (the flight and its flight test), never invented figures.
+        if (aboutPlane && !Debrief.Grounded(lesson.Lesson, outcome))
+        {
+            say("debrief", "Debrief: a plane note with numbers the flight didn't measure, not saved (\"" + lesson.Lesson + "\").");
+            return false;
+        }
         var saved = await tools.CallAsync("learn", new Dictionary<string, object?>
         {
             ["skill"] = lesson.Skill, ["lesson"] = lesson.Lesson, ["flightId"] = flightId, ["aboutPlane"] = aboutPlane,
@@ -97,6 +103,7 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             craft = FreeFlight.Craft(status) ?? craft;
             tried.Add(craft);
             var launchCraft = craft;
+            string? groundTested = null; // a new plane's ground test, for its notes
             if (goal.Approach == "craft")
             {
                 // A plane it hasn't flown this session (the knowledge store decides if it's new to this agent).
@@ -125,6 +132,8 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 if (launched.StartsWith("Not launched", StringComparison.Ordinal))
                     return "Free flight stopped: " + launched.Split('\n')[0].Trim();
                 await Task.Delay(Settle, cancel);
+                // A new plane: its ground handling first, on the runway (the owner's idea).
+                groundTested = goal.Approach == "craft" ? await TestAsync(hub.Last, TimeSpan.FromMinutes(3), interrupted, cancel) : null;
                 var off = await Call("take_off", new Dictionary<string, object?> { ["heading"] = 90.0, ["altitude"] = 900.0 }, cancel);
                 if (off.StartsWith("Takeoff rejected", StringComparison.Ordinal) && ++rejected < 2)
                 {
@@ -147,6 +156,9 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             idle = 0; // it's flying
             var mark = hub.Last;
             var ceiling = limits.CeilingM;
+            string? tested = null; // the flight test's results (a new plane), for its notes
+            if (goal.Approach == "craft")
+                tested = string.Join(" ", new[] { groundTested, await TestAsync(mark, TimeSpan.FromMinutes(9), interrupted, cancel) }.OfType<string>()) is { Length: > 0 } both ? both : null;
             if (goal.Approach == "fast")
                 await FastLegsAsync(interrupted, cancel);
             else if (goal.Approach == "high")
@@ -195,7 +207,10 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             }
             var good = recorded?.Data?["skills"]?[goal.Skill] is JsonValue g && g.TryGetValue<bool>(out var gb) && gb;
             var flownIn = o.Data?["craft"] is JsonValue cv && cv.TryGetValue<string>(out var cs) ? cs : launchCraft;
-            var learned = recorded != null && await DebriefAsync(recorded.Value.Data, $"{o.Text} (in the {flownIn})", cancel);
+            var record = $"{o.Text} (in the {flownIn})" + (tested != null ? " " + tested : "");
+            var learned = recorded != null && await DebriefAsync(recorded.Value.Data, record, cancel);
+            if (tested != null && recorded != null)
+                learned |= await PlaneNoteAsync(recorded.Value.Data, flownIn, tested, record, cancel);
             history.Add((goal, good, learned));
             // Training: done once the focus has gone well enough times in a row.
             if (focus != null)
@@ -206,6 +221,63 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             }
         }
         return interrupted() ? "Free flight stopped for an order." : "Free flight over.";
+    }
+
+    /// <summary>
+    /// A test of the new plane (test_plane): on the runway the ground test, in the air the flight test; then its
+    /// results from the "test" event. Null when it couldn't run, stopped early, or the flight ended (a crash) first.
+    /// </summary>
+    private async Task<string?> TestAsync(long mark, TimeSpan longest, Func<bool> interrupted, CancellationToken cancel)
+    {
+        var started = await Call("test_plane", None, cancel);
+        if (!started.StartsWith("Flight test", StringComparison.Ordinal) && !started.StartsWith("Ground test", StringComparison.Ordinal))
+            return null;
+        var deadline = DateTime.UtcNow + longest;
+        while (DateTime.UtcNow < deadline && !interrupted() && !cancel.IsCancellationRequested)
+        {
+            await Task.Delay(Poll, cancel);
+            if (hub.After(mark, "test") is { } t)
+            {
+                say("free", t.Text);
+                return t.Text.Contains("stopped", StringComparison.Ordinal) ? null : t.Text;
+            }
+            if (hub.After(mark, "outcome") != null)
+                return null;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// After a flight test: the planner writes one note about how the plane differs, from the measured numbers; code
+    /// checks the numbers and saves it as a note about that plane, citing the flight.
+    /// </summary>
+    private async Task<bool> PlaneNoteAsync(JsonNode? recorded, string craft, string test, string record, CancellationToken cancel)
+    {
+        if (recorded?["flightId"] is not JsonValue idValue || !idValue.TryGetValue<long>(out var flightId) || recorded["skills"] is not JsonObject graded || graded.Count == 0)
+            return false;
+        var skills = graded.Select(g => g.Key).ToList();
+        string answer;
+        try
+        {
+            answer = await planner.AskAsync(Debrief.System, Debrief.PlanePrompt(craft, test, record, skills), cancel);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+        if (Debrief.Parse(answer, skills) is not { } note)
+            return false;
+        if (!Debrief.Grounded(note.Lesson, record))
+        {
+            say("debrief", "Plane note with numbers the test didn't measure, not saved (\"" + note.Lesson + "\").");
+            return false;
+        }
+        var saved = await tools.CallAsync("learn", new Dictionary<string, object?>
+        {
+            ["skill"] = note.Skill, ["lesson"] = note.Lesson, ["flightId"] = flightId, ["aboutPlane"] = true,
+        }, cancel);
+        say("debrief", $"Plane note ({craft}): {note.Lesson} → {saved}");
+        return !saved.StartsWith("The tower refused", StringComparison.Ordinal) && !saved.StartsWith("No tower", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -269,18 +341,21 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
         }
     }
 
-    /// <summary>The fly-high drill: climb to 6,000 m in legs back and forth over KSC (it stays in the box), up to 6 minutes.</summary>
+    /// <summary>
+    /// The fly-high drill: climb to 6,000 m in a square of right turns over KSC (it stays in the box), up to 6 minutes.
+    /// Legs back and forth didn't: a 180° turn at 160 m/s takes 90 s, longer than a leg, so the rig's plane always turned
+    /// the same way and spiralled 48 km south.
+    /// </summary>
     private async Task ClimbHighAsync(Func<bool> interrupted, CancellationToken cancel)
     {
-        var heading = 270.0;
-        for (var leg = 0; leg < 6 && !interrupted(); leg++)
+        double[] square = [270, 0, 90, 180];
+        for (var leg = 0; leg < 8 && !interrupted(); leg++)
         {
-            await Call("fly", new Dictionary<string, object?> { ["heading"] = heading, ["altitude"] = 6000.0, ["speed"] = 170.0 }, cancel);
-            for (var i = 0; i < 20 && !interrupted(); i++)
+            await Call("fly", new Dictionary<string, object?> { ["heading"] = square[leg % 4], ["altitude"] = 6000.0, ["speed"] = 170.0 }, cancel);
+            for (var i = 0; i < 15 && !interrupted(); i++)
                 await Task.Delay(Poll, cancel);
             if (FreeFlight.Where(await tools.CallAsync("status", None, cancel)) is { Altitude: > 5600 })
                 return;
-            heading = heading == 270 ? 90 : 270;
         }
     }
 

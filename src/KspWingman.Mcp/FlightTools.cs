@@ -15,7 +15,7 @@ namespace KspWingman.Mcp;
 /// universe). Agents think in seconds, so these are autopilot-level, not stick and rudder.
 /// </summary>
 [McpServerToolType]
-public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink tower)
+public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink tower, PlaneBook planes, FlightEvents events)
 {
     [McpServerTool(Name = "launchable_craft"), Description(
         "The craft the agent's KSP can launch: from the VAB (rockets, launch pad) and the SPH (planes and rovers, runway).")]
@@ -63,6 +63,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
                    "their crew). Recover one: fly it and recover, or in KSP's Tracking Station. Otherwise KSP would stop on a " +
                    "\"No Control\" question nobody can answer from here.";
         space.LaunchVessel(directory, craft, directory == "VAB" ? "LaunchPad" : "Runway", null, true, "");
+        director.NewFlight(craft, planes.SetupFor(craft)); // this plane's own numbers, from its flight test
         return $"Launching {craft} on the {(directory == "VAB" ? "launch pad" : "runway")}. It takes a few seconds; then status shows it. " +
                (directory == "SPH" ? "It's on the ground, not flying: next, take_off. " : "It's on the pad: next, stage to launch. ") +
                "Mind LMP's safety bubble: other players can't see the agent within 100 m of the pad or the runway start.";
@@ -264,7 +265,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         "Planes only: the craft needs wheels and wings.")]
     public async Task<string> TakeOff(
         [Description("Compass heading to fly on once airborne (it always takes off straight along the runway first).")] double heading = 90,
-        [Description("Speed (m/s) to lift the nose at.")] double rotateSpeed = 55,
+        [Description("Speed (m/s) to lift the nose at; leave out for the plane's own (from its flight test, else 55).")] double? rotateSpeed = null,
         [Description("Pitch (degrees) to climb at.")] double climbPitch = 12,
         [Description("Altitude (m above sea level) to fly at afterwards; leave out for 500 m above the ground.")] double? altitude = null,
         [Description("Speed (m/s) to fly at afterwards.")] double speed = 150,
@@ -275,7 +276,11 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
             return "Not flying: launch a plane on the Runway first.";
         // Whatever the agent asked for, within what a plane can do (a small model once asked to rotate at 5 m/s).
         heading = (heading % 360 + 360) % 360;
-        rotateSpeed = Math.Clamp(rotateSpeed, 40, 90);
+        // Launched some other way (by hand, or before this session): this plane's setup now.
+        var name = director.CraftOf(Localized(krpc, krpc.Run(_ => vessel.Name)));
+        if (!string.Equals(director.Craft, name, StringComparison.OrdinalIgnoreCase))
+            director.NewFlight(name, planes.SetupFor(name));
+        var rotate = Math.Clamp(rotateSpeed ?? director.Setup.RotateSpeed, 40, 90);
         climbPitch = Math.Clamp(climbPitch, 5, 20);
         var (control, autopilot, space) = krpc.Run(c => (vessel.Control, vessel.AutoPilot, c.SpaceCenter()));
         var surface = vessel.SurfaceReferenceFrame;
@@ -295,6 +300,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         var runway = krpc.Run(_ => vessel.Flight(surface).Heading);
         var start = DateTime.UtcNow;
         var rotated = false;
+        (DateTime Time, double Heading)? lastHeading = null;
         while (DateTime.UtcNow - start < TimeSpan.FromSeconds(90))
         {
             var (rollSpeed, height, actual) = krpc.Run(_ => (vessel.Flight(ground).Speed, vessel.Flight(ground).SurfaceAltitude, vessel.Flight(surface).Heading));
@@ -303,7 +309,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
                 // Steer the nose wheel back onto the heading: a few degrees off is a gentle push, never full lock.
                 var error = ((runway - actual + 540) % 360) - 180;
                 // A takeoff that starts badly is stopped on the runway (the owner's idea): veering, or too slow.
-                if (TakeoffCheck.Reject(DateTime.UtcNow - start, rollSpeed, error, rotateSpeed) is { } why)
+                if (TakeoffCheck.Reject(DateTime.UtcNow - start, rollSpeed, error, rotate) is { } why)
                 {
                     krpc.Run(_ =>
                     {
@@ -317,8 +323,13 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
                         await Task.Delay(250, cancel);
                     return $"Takeoff rejected: {why}. Stopped on the runway, brakes on; recover and launch again to try again.";
                 }
-                krpc.Run(_ => control.WheelSteering = (float)Math.Clamp(-error / 10, -0.5, 0.5));
-                if (rollSpeed >= rotateSpeed)
+                // Damped by the turn rate (positive turning right; the wheel's positive steers left): undamped, the
+                // Aeris 3A swung ±10° for 12 s after a pulse at 14 m/s in its ground test. Scaled by its own nose wheel.
+                var now = DateTime.UtcNow;
+                var yawRate = lastHeading is { } lh && (now - lh.Time).TotalSeconds > 0.01 ? Pilot.Wrap(actual - lh.Heading) / (now - lh.Time).TotalSeconds : 0;
+                lastHeading = (now, actual);
+                krpc.Run(_ => control.WheelSteering = (float)Math.Clamp((-error / 10 + 0.05 * yawRate) * director.Setup.SteerGain, -0.5, 0.5));
+                if (rollSpeed >= rotate)
                 {
                     rotated = true;
                     krpc.Run(_ =>
@@ -347,6 +358,61 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         return NotAirborne(lastSpeed, lastHeight, rotated);
     }
 
+    [McpServerTool(Name = "test_plane"), Description(
+        "Tests the agent's plane. On the runway, stopped (right after launch): the ground test, about a minute: a roll " +
+        "with the nose wheel straight, a steering pulse, a brake stop; then take_off. In the air (right after take_off is " +
+        "fine, it climbs to 1,500 m above the ground first): the flight test, a pulse on the elevator and " +
+        "one on the ailerons, a 180° turn, slowing with the throttle shut until it can't hold its height (its slowest " +
+        "speed), then full throttle. About four minutes; status shows each step. It measures how this plane handles, " +
+        "compared with the Aeris 3A, and sets the pilot up for it (steering, rotate, approach and landing speeds); with " +
+        "LUNA EVO's tower the numbers are kept for every agent. Holds level afterwards.")]
+    public string TestPlane() => krpc.Run(connection =>
+    {
+        var vessel = InFlight(connection, out var problem);
+        if (vessel == null)
+            return problem!;
+        var g = vessel.Flight(vessel.Orbit.Body.ReferenceFrame);
+        // On the runway, stopped: the ground test (the owner's idea: ground handling matters), before take_off.
+        if (vessel.Situation is VesselSituation.PreLaunch or VesselSituation.Landed && g.Speed < 1)
+        {
+            var name = director.CraftOf(Localized(krpc, vessel.Name));
+            if (!string.Equals(director.Craft, name, StringComparison.OrdinalIgnoreCase))
+                director.NewFlight(name, planes.SetupFor(name));
+            director.TestGround(new GroundTest(name), test =>
+            {
+                if (test.Result is { } r)
+                {
+                    // Kept with the plane's last flight test straight away; the next one in the air carries it too.
+                    if (planes.TestOf(name) is { } earlier)
+                        planes.Tested(earlier with { SteerRate = r.SteerRate, Drift = r.Drift, Braking = r.Braking });
+                    events.Add("test", test.Describe(r) + $" Nose wheel ×{director.Setup.SteerGain:0.00}.", new { craft = name, ground = r });
+                }
+                else
+                    events.Add("test", $"Ground test of the {name} stopped: {test.Problem}.", new { craft = name, problem = test.Problem });
+            });
+            return $"Ground test of the {name} started (about a minute, some 200 m of runway): a roll with the nose wheel straight, a steering pulse, a brake stop. Then take_off.";
+        }
+        if (vessel.Situation != VesselSituation.Flying || g.SurfaceAltitude < FlightTest.StartHeight)
+            return string.Create(CultureInfo.InvariantCulture, $"Not now: a flight test starts in the air, at least {FlightTest.StartHeight:0} m above the ground (it's {g.SurfaceAltitude:0} m).");
+        var craft = director.CraftOf(Localized(krpc, vessel.Name));
+        if (!string.Equals(director.Craft, craft, StringComparison.OrdinalIgnoreCase))
+            director.NewFlight(craft, planes.SetupFor(craft));
+        director.Test(new FlightTest(craft), test =>
+        {
+            if (test.Result is { } found)
+            {
+                var result = director.Ground is { } ground ? found with { SteerRate = ground.SteerRate, Drift = ground.Drift, Braking = ground.Braking } : found;
+                planes.Tested(result);
+                var setup = PlaneSetup.From(result);
+                director.Use(setup);
+                events.Add("test", result.Describe() + " Setup: " + setup.Describe() + ".", result);
+            }
+            else
+                events.Add("test", $"Flight test of the {craft} stopped: {test.Problem}.", new { craft, problem = test.Problem });
+        });
+        return $"Flight test of the {craft} started (about four minutes). status shows each step; the results come as a \"test\" event.";
+    });
+
     private static string Airborne(double height, double speed, double heading, double cruise, double cruiseSpeed) => string.Create(CultureInfo.InvariantCulture,
         $"Airborne: {height:0} m above the ground at {speed:0} m/s on heading {heading:0}°, gear up. Now flying on: heading {heading:0}°, " +
         $"{cruise:0} m, {cruiseSpeed:0} m/s. Use fly, follow or land to change that.");
@@ -355,6 +421,21 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         $"Didn't get airborne in 90 s: {speed:0} m/s, {height:0} m above the ground ({(rotated ? "nose lifted, but no climb" : "never reached rotate speed")}). Try stop_flying, then recover.");
 
     private static string On(bool value) => value ? "on" : "off";
+
+    /// <summary>A stock craft's name as KSP shows it ("#autoLOC_501174" → "Aeris 3A"), through the bridge; else as is.</summary>
+    public static string Localized(KrpcLink link, string name)
+    {
+        if (!name.StartsWith("#autoLOC", StringComparison.Ordinal))
+            return name;
+        try
+        {
+            return link.Wingman<string>("Localize", name);
+        }
+        catch (Exception e) when (e is WingmanException or KRPC.Client.RPCException or System.InvalidOperationException)
+        {
+            return name;
+        }
+    }
 
     /// <summary>The agent's vessel, or null and why (not in flight).</summary>
     private static Vessel? InFlight(KRPC.Client.Connection connection, out string? problem)

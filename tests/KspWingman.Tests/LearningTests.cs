@@ -21,6 +21,8 @@ public sealed class LearningTests
         const string planeNote = "SKILL: takeoff | LESSON: Rotate the Gull at 50 m/s, it lifts early. | PLANE";
         Assert.Equal("Rotate the Gull at 50 m/s, it lifts early.", Debrief.Parse(planeNote, skills)!.Value.Lesson);
         Assert.True(Debrief.AboutPlane(planeNote));
+        // gemma4 in the rig added the plane's name after the marker: it isn't part of the lesson either.
+        Assert.Equal("The roll rate is 0.5×, so start turns earlier.", Debrief.Parse("SKILL: takeoff | LESSON: The roll rate is 0.5×, so start turns earlier. | PLANE: Aeris 4A", skills)!.Value.Lesson);
         Assert.False(Debrief.AboutPlane("SKILL: takeoff | LESSON: Rotate at 50 m/s."));
         // Skill names instead of ids (PlannerEval: qwen3:8b, gemma4:e4b), mapped only onto the flight's own skills.
         Assert.Equal("land-rnav", Debrief.Parse("SKILL: RNAV Landing | LESSON: Correct heading to within 2° before F09.", skills)?.Skill);
@@ -94,6 +96,12 @@ public sealed class LearningTests
     private sealed class FakeTools(EventHub hub, string where = "lat -0.0486 lon -74.7000") : IToolHost
     {
         public List<string> Calls { get; } = [];
+
+        /// <summary>What launchable_craft answers ("ok": no SPH line, no planes).</summary>
+        public string Craft { get; init; } = "ok";
+
+        /// <summary>The flight test's numbers, as test_plane's "test" event says them.</summary>
+        public string Test { get; init; } = "Flight test of the Gull: pitch 36 °/s per full stick (2.0× the Aeris 3A), roll 80 °/s (0.5×), slowest 62 m/s.";
         private bool _flying;
         private int _checks;
         private long _flights;
@@ -122,6 +130,11 @@ public sealed class LearningTests
                     return Task.FromResult(Menu);
                 case "learn":
                     return Task.FromResult("Lesson saved on the server.");
+                case "launchable_craft":
+                    return Task.FromResult(Craft);
+                case "test_plane":
+                    hub.Add("test", Test, null);
+                    return Task.FromResult("Flight test of the Gull started (about four minutes).");
                 default:
                     return Task.FromResult("ok");
             }
@@ -159,6 +172,38 @@ public sealed class LearningTests
         var result = await learner.FreeFlyAsync(30, new FreeFlightLimits(), () => false, CancellationToken.None, ["new-craft"]);
         Assert.StartsWith("Training stopped: no plane in the save's SPH", result);
         Assert.True(tools.Calls.Count < 10);
+    }
+
+    [Fact]
+    public async Task Training_on_a_new_plane_flight_tests_it_and_writes_a_note_from_the_measured_numbers()
+    {
+        var hub = new EventHub();
+        var tools = new FakeTools(hub) { Craft = "VAB (launch pad): Kerbal X\nSPH (runway): Aeris 3A, Gull" };
+        var planner = new Planner(
+            "NONE", // the debrief: nothing for the skill (one goal: the planner isn't asked which)
+            "SKILL: takeoff | LESSON: Roll gently in the Gull: it rolls 0.5× as fast as the Aeris 3A but pitches 2.0× as fast. | PLANE");
+        var said = new List<string>();
+        var learner = new Learner(tools, planner, hub, (kind, text) => said.Add($"{kind}: {text}")) { Settle = TimeSpan.Zero, Poll = TimeSpan.FromMilliseconds(10) };
+        await learner.FreeFlyAsync(30, new FreeFlightLimits(), () => tools.Calls.Count(c => c == "take_off") >= 1 && tools.Calls.Contains("learn:takeoff"),
+            CancellationToken.None, ["new-craft"]);
+
+        // Off in the new plane, the test card, then the landing; the note quotes only what the test measured.
+        var order = tools.Calls.SkipWhile(c => c != "take_off").ToList();
+        Assert.Equal(["launch", "test_plane", "take_off"], tools.Calls.SkipWhile(c => c != "launch").Take(3)); // its ground test first
+        Assert.Equal(["take_off", "test_plane"], order.Take(2)); // then the one in the air
+        Assert.Contains("land:visual", order);
+        Assert.Contains(planner.Prompts, p => p.Contains("A flight test just measured the Gull") && p.Contains("slowest 62 m/s"));
+        Assert.Contains(said, s => s.StartsWith("debrief: Plane note (Gull): Roll gently in the Gull", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_plane_note_may_only_quote_measured_numbers()
+    {
+        const string facts = "Flight test of the Gull: pitch 36 °/s per full stick (2.0× the Aeris 3A), roll 80 °/s (0.5×), slowest 62 m/s.";
+        Assert.True(Debrief.Grounded("Lift the nose at 62 m/s in the Gull, not like the Aeris 3A.", facts));
+        Assert.True(Debrief.Grounded("Bank gently: it rolls at 82 °/s.", facts)); // within 10%
+        Assert.False(Debrief.Grounded("Land the Gull at 95 m/s.", facts)); // never measured
+        Assert.True(Debrief.Grounded("Roll gently in the Gull.", facts)); // no numbers, nothing to check
     }
 
     [Fact]

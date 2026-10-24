@@ -84,6 +84,24 @@ public sealed class LandingTests
     }
 
     [Fact]
+    public void Risks_the_landing_until_the_decision_point()
+    {
+        var onSlope = (double along) => 69 + Math.Max(0, -along) * Math.Tan(4 * Math.PI / 180);
+        // 1.4 km out and 200 m off the centerline (the rig's Aeris 4A went around here three times): it keeps correcting.
+        var risky = new Landing(Runway.Ksc);
+        risky.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 3000, 0, onSlope(-3000)), 90, 100, 200, false);
+        var still = risky.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 1400, 200, onSlope(-1400)), 80, 100, 100, false);
+        Assert.Equal(LandingPhase.Final, still.Phase);
+        // At the decision point still 100 m off: around it goes.
+        var late = risky.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 500, 100, onSlope(-500)), 80, 100, 35, false);
+        Assert.Equal(LandingPhase.GoAround, late.Phase);
+        // Lined up there and on the slope: it lands.
+        var good = new Landing(Runway.Ksc);
+        good.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 3000, 0, onSlope(-3000)), 90, 100, 200, false);
+        Assert.Equal(LandingPhase.Final, good.Step(Kerbin, AtRunway(Landing.TouchdownAfterThreshold - 500, 30, onSlope(-500) + 20), 90, 80, 55, false).Phase);
+    }
+
+    [Fact]
     public void Goes_around_when_the_ground_comes_up_far_out()
     {
         // 4 km out, on the slope by altitude, but a hill 60 m below: climb away, don't land on the hill.

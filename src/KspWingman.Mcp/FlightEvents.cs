@@ -106,7 +106,7 @@ public sealed class FlightWatch : IDisposable
                     if (FlightTools.Wrecked(v))
                         return new PhaseInput(true, "Flying", true, 0, 0, 0, _director.Doing);
                     var g = v.Flight(v.Orbit.Body.ReferenceFrame);
-                    _craft = v.Name;
+                    _craft = _director.CraftOf(FlightTools.Localized(_link, v.Name));
                     return new PhaseInput(true, v.Situation.ToString(), false, g.Speed, g.VerticalSpeed, g.SurfaceAltitude, _director.Doing);
                 });
                 if (_tracker.Update(input, DateTime.UtcNow, _director.Approach, _director.LastLanding) is { } change)
@@ -122,7 +122,7 @@ public sealed class FlightWatch : IDisposable
                     var landing = w.Outcome.Landing ?? (w.Outcome.Result == "landed" ? _director.LastLanding : null);
                     if (landing != null || w.Outcome.Result != "landed" || DateTime.UtcNow - w.Since > TimeSpan.FromSeconds(5))
                     {
-                        var o = w.Outcome with { Landing = landing };
+                        var o = w.Outcome with { Landing = landing, Finals = _director.Finals };
                         _events.Add("outcome", Describe(o), o);
                         _waiting = null;
                     }
@@ -146,6 +146,9 @@ public sealed class FlightWatch : IDisposable
         if (o.Landing is { } l)
             text += string.Create(CultureInfo.InvariantCulture,
                 $": stopped {l.DownRunway:0} m down {l.Runway}, {l.OffCenterline:0} m off the centerline, {l.HeadingError:0}° off the heading");
+        if (o.Finals is { Count: > 0 } finals)
+            text += "; finals: " + string.Join(", ", finals.Select(f => string.Create(CultureInfo.InvariantCulture,
+                $"crossed the centerline {f.Weaves} time{(f.Weaves == 1 ? "" : "s")}, {Math.Abs(f.High):0} m {(f.High >= 0 ? "above" : "below")} the slope 1 km out")));
         return text + ".";
     }
 

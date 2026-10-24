@@ -68,6 +68,17 @@ public sealed class ApproachTests
         Assert.True(Landing.Rollout(40, 6, 0).Brakes); // a little off: brake (or it runs off the end)
         Assert.False(Landing.Rollout(40, 2, 0, yawRate: 12).Brakes); // the nose swinging: not yet
         Assert.False(Landing.Rollout(60, 0, 0).Brakes); // too fast for brakes
+        // ...unless the runway left is short for this plane's brakes (the rig's Aeris 4A: 89 m/s, 8.4 m/s², 1.4 km left).
+        Assert.True(Landing.Rollout(89, 1, 0, remaining: 1300, braking: 8.4).Brakes);
+        Assert.False(Landing.Rollout(89, 1, 0, remaining: 2500, braking: 8.4).Brakes);
+        Assert.False(Landing.Rollout(89, 12, 0, remaining: 1300, braking: 8.4).Brakes); // swinging: still not
+        Assert.False(Landing.Rollout(89, 7, 0, remaining: 1300, braking: 8.4).Brakes); // fast, steadier needed than slow
+        Assert.False(Landing.Rollout(89, 1, 0, yawRate: 7, remaining: 1300, braking: 8.4).Brakes);
+        // Can't stop in what's left and fast enough to fly: a touch-and-go; slow or with little runway left: brake.
+        Assert.True(Landing.TouchAndGo(85, 900, 8.4, 74));
+        Assert.False(Landing.TouchAndGo(85, 1500, 8.4, 74));
+        Assert.False(Landing.TouchAndGo(70, 900, 8.4, 74));
+        Assert.False(Landing.TouchAndGo(85, 250, 8.4, 74));
         var mid = Math.Abs(Landing.Rollout(20, 2, 0).Steer);
         Assert.True(Math.Abs(Landing.Rollout(8, 2, 0).Steer) < mid, "gentler when slow");
         Assert.True(Math.Abs(Landing.Rollout(60, 2, 0).Steer) < mid / 2, "and much gentler when fast (the ground loop)");

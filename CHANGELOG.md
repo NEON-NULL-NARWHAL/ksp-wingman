@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.11.0 (2026-10-24): flight tests and each plane's own setup
+
+### Added
+- **`test_plane`** (the owner's idea: learn each plane from real tests): on the runway, a ground test (a roll with the
+  nose wheel straight, a steering pulse, a brake stop; about 200 m); in the air, a flight test (an elevator and an
+  aileron pulse, a 180° turn, slowing at idle until it can't hold its height, full throttle; about four minutes from
+  1,500 m above the ground). The numbers are compared with the Aeris 3A's, measured the same way in the rig.
+- **Each plane's own setup**, worked out from its tests: elevator, aileron and nose wheel gains, rotate, approach and
+  landing speeds, how slow to fly before the final; corrected by its last finals (weaving, arriving high). `launch` and
+  `take_off` load it; `status` shows it. With LUNA EVO's tower (Mission Control 2.17) the tests are shared by every agent.
+- **A faster final** (the owner's idea): planes join the final faster and slow down along it, as fast as their measured
+  slowing allows, to be at landing speed 1.5 km out.
+- **Risk the landing, then go around** (the owner's idea): far out only a plane that's badly off (250 m from the
+  centerline, 120 m high) goes around; the decision is made 600 m before touchdown (within 60 m of the centerline, at
+  most 40 m high).
+- **Fast planes stop snaking on final**: the pilot aimed at the centerline 3 s ahead, fine at the Aeris 3A's 90 m/s
+  but far too close for a plane turning 4-5 km wide at 140 m/s (the rig's Aeris 4A snaked ±400 m on every final and
+  went around three times). The aim point now grows with the speed cubed above 90 m/s (1.6 km at 140 m/s), and each
+  centerline crossing on a final stretches it further; a laggy simulated plane that crossed three times now crosses
+  at most once and is lined up at the decision point.
+- **Brakes by the runway left, and a touch-and-go when it can't stop**: the brakes come on at any speed when the runway
+  left is short for this plane's measured braking (they waited for 60 m/s, and the rig's Aeris 4A, touching down at
+  93 m/s, ran off the end); too fast to stop and still above its rotate speed, it goes around from the runway. Above
+  60 m/s the brakes hold only while the nose is very steady (within 4°, turning under 3 °/s), like anti-skid.
+- **A bounce is still the rollout**: after touchdown, "flying" under 4 m is treated as rolling out; the rig's Aeris
+  4A hopped at 58 m/s, below its stall, and the landing sent it around into the ground.
+- **Training on new planes** tests each one (ground, then air) before landing it, and the debrief writes a note about
+  how it differs from the Aeris 3A; a note quoting numbers the tests didn't measure isn't saved.
+- Reports tell the tower the plane's approach speed (fast planes get the long approaches); "Offline" when the agent's
+  KSP isn't in a server; "leaving" when it stops.
+- FlightLab `ground`, `test` and `steps` modes (the reference numbers, and turns with given gains).
+
+### Fixed
+- **The pilot couldn't lift a nose-heavy plane's nose**: at most 0.1 of trim, the Aeris 4A flew level at 150 m/s with
+  its nose 2° up, sinking into the sea after every takeoff. The trim may now grow to 0.4 (fast only while the quick
+  corrections are at their limit, so the Aeris 3A flies as before).
+- Takeoff steering is damped by the turn rate (undamped, the Aeris 3A swung ±10° for 12 s after a pulse at 14 m/s).
+- A repeated go-around report (every 2-4 s until 300 m) and a new plane put in the hold from the last plane's request.
+- The fly-high drill flies a square over KSC (its back-and-forth legs spiralled 48 km away).
+- Stock planes were named "#autoLOC_501174" in flight records.
+
+### In the test rig
+- The Aeris 3A, tested twice the same way: pitch 55 and roll 408 °/s per stick, slowest 54 m/s, nose wheel 25-27 °/s,
+  brakes 9 m/s². Its setup from that (landing 73 m/s, rotate 54) matches the hand-tuned one (75, 55).
+- The Aeris 4A had never landed: it sank into the sea after every takeoff (not enough trim), then stalled at the Aeris's
+  speeds (its slowest is 71-74 m/s), snaked on every final, ran off the end of the runway, and crashed in a bounce.
+  Fixed one by one, it landed 7 m off the centerline, 1,817 m down the runway, and taxied off.
+
 ## 0.10.0 (2026-10-24): rejected takeoffs and go-arounds
 
 ### Added

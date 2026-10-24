@@ -22,6 +22,7 @@ builder.Services.AddSingleton(services =>
         // As localhost: the tower's listener only answers to that name (127.0.0.1 gets a 400 from Windows' HTTP.sys).
         ? new TowerClient(new UriBuilder(tower) { Host = "localhost" }.Uri, host, port, services.GetRequiredService<Director>(), services.GetRequiredService<FlightEvents>())
         : null));
+builder.Services.AddSingleton(services => new PlaneBook(services.GetRequiredService<TowerLink>()));
 builder.Services.AddMcpServer().WithStdioServerTransport().WithToolsFromAssembly();
 var app = builder.Build();
 app.Services.GetRequiredService<TowerLink>(); // the tower client reports from the start, not from the first tool call

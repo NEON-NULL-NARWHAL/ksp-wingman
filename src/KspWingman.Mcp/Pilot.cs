@@ -22,10 +22,14 @@ public readonly record struct PlaneInputs(float Pitch, float Roll, float Yaw, fl
 /// roll +115° of roll. So the inputs stay small and every axis is damped by its own rate. The chain, slowest outside:
 /// altitude → climb rate → pitch → elevator; heading → bank → ailerons; speed → throttle.
 /// </summary>
-public sealed class Pilot
+/// <param name="setup">The plane's own numbers (Handling.cs); null: the Aeris 3A's.</param>
+public sealed class Pilot(PlaneSetup? setup = null)
 {
     public const double MaxBank = 30, MaxClimbRate = 15, MaxPitchUp = 20, MaxPitchDown = -12;
-    public const float MaxSurface = 0.25f; // never more than a quarter stick: this plane needs little
+    public const float MaxSurface = 0.25f; // never more than a quarter stick for the quick part: the Aeris 3A needs little
+
+    /// <summary>The most trim (stick held for good) the pilot builds up: a nose-heavy plane needs more than the Aeris.</summary>
+    public const double MaxTrim = 0.4;
 
     /// <summary>The speed the gains were tuned at (m/s), and the height (m above ground) below which it won't descend.</summary>
     public const double TunedSpeed = 150, SafeHeight = 150;
@@ -34,7 +38,9 @@ public sealed class Pilot
     public const double TurningSpeed = 160;
 
     private double? _lastPitch, _lastRoll;
-    private double _pitchTrim, _throttleTrim = 0.2; // a slick jet cruises on little throttle (the rig's Aeris: under 0.2 at 120 m/s)
+    private readonly PlaneSetup _setup = setup ?? PlaneSetup.Default;
+    private double _pitchTrim;
+    private double _throttleTrim = (setup ?? PlaneSetup.Default).CruiseThrottle; // a slick jet cruises on little throttle (the rig's Aeris: under 0.2 at 120 m/s)
 
     /// <summary>One step of <paramref name="dt"/> seconds. Keeps a little state (rates, trim), so one Pilot per flight.</summary>
     public PlaneInputs Step(PlaneState s, PlaneTarget t, double dt)
@@ -57,13 +63,18 @@ public sealed class Pilot
         if (tooLow)
             pitchTarget = Math.Max(pitchTarget, 10);
         var pitchError = pitchTarget - s.Pitch;
-        _pitchTrim = Math.Clamp(_pitchTrim + 0.002 * pitchError * dt, -0.1, 0.1); // slow: what the plane needs to fly level
-        var elevator = authority * (0.012 * pitchError - 0.006 * pitchRate) + _pitchTrim;
+        // The quick part stays within a quarter stick; the slow trim (what the plane needs to fly level) may grow to 0.4.
+        // At ±0.1 the Aeris 4A couldn't raise its nose: it flew 150 m/s with the nose 2° up, sinking into the sea (rig,
+        // 2026-10-24). The trim winds up fast only while the quick part is at its limit, so the Aeris 3A flies as before.
+        var quick = Math.Clamp(_setup.PitchGain * authority * (0.012 * pitchError - 0.006 * pitchRate), -MaxSurface, MaxSurface);
+        var trimRate = Math.Abs(quick) >= MaxSurface ? 0.01 : 0.002;
+        _pitchTrim = Math.Clamp(_pitchTrim + trimRate * pitchError * dt, -MaxTrim, MaxTrim);
+        var elevator = quick + _pitchTrim;
 
         // Heading → bank → ailerons.
         var maxBank = t.MaxBank > 0 ? Math.Min(t.MaxBank, MaxBank) : t.Landing ? 20 : MaxBank;
         var bankTarget = tooLow ? 0 : Math.Clamp(1.2 * Wrap(t.Heading - s.Heading), -maxBank, maxBank);
-        var aileron = authority * (0.006 * Wrap(bankTarget - s.Roll) - 0.003 * rollRate);
+        var aileron = _setup.RollGain * authority * (0.006 * Wrap(bankTarget - s.Roll) - 0.003 * rollRate);
 
         // Speed → throttle (slow and smooth). In a big turn, slow down first: at 270 m/s a 30° bank turns 13 km wide, and
         // the rig's agent circled past the player it was meant to join.
@@ -75,7 +86,7 @@ public sealed class Pilot
         var throttle = Math.Clamp(_throttleTrim + 0.025 * speedError, 0, 1);
 
         return new PlaneInputs(
-            (float)Math.Clamp(elevator, -MaxSurface, MaxSurface),
+            (float)Math.Clamp(elevator, -MaxSurface - MaxTrim, MaxSurface + MaxTrim),
             (float)Math.Clamp(aileron, -MaxSurface, MaxSurface),
             0,
             (float)throttle);

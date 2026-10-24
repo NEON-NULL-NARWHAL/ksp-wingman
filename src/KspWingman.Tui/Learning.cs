@@ -77,6 +77,32 @@ public static partial class Debrief
         "differs from other planes), end the line with | PLANE. If the flight taught nothing new, answer NONE." +
         (skills.Values.All(good => good) ? " Every grade is good: answer NONE unless the record shows something clearly worth improving." : "");
 
+    /// <summary>
+    /// After a flight test (the owner's idea: learn each plane from real tests): one note about how this plane differs
+    /// from the Aeris 3A, from the test's numbers only. Code checks every number in it (Grounded).
+    /// </summary>
+    public static string PlanePrompt(string craft, string test, string outcome, IReadOnlyCollection<string> skills) =>
+        $"A flight test just measured the {craft}. {test}\nThe flight: {outcome}\n" +
+        "Write ONE note for pilots about how this plane handles differently from the Aeris 3A (the plane the pilot was " +
+        "tuned on) and what to do about it, 10 to 200 characters, using only numbers from the test or the flight above " +
+        "(e.g. \"Lift the nose at 62 m/s: it flies no slower than 58 m/s, the Aeris 3A goes slower.\"). SKILL is one of these " +
+        "ids, exactly: " + string.Join(", ", skills) + ". Answer exactly:\nSKILL: <skill id> | LESSON: <sentence> | PLANE\n" +
+        "If nothing differs enough to matter, answer NONE.";
+
+    /// <summary>
+    /// Whether every number in a lesson comes from the facts (within 10%, or 1 for small numbers): a plane note mustn't
+    /// invent figures the flight test never measured.
+    /// </summary>
+    public static bool Grounded(string lesson, string facts)
+    {
+        var known = Numbers().Matches(facts).Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture)).ToList();
+        return Numbers().Matches(lesson).Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture))
+            .All(n => known.Any(k => Math.Abs(k - n) <= Math.Max(1, Math.Abs(k) * 0.1)));
+    }
+
+    [GeneratedRegex(@"\d+(?:\.\d+)?")]
+    private static partial Regex Numbers();
+
     /// <summary>Whether the lesson is about the flight's plane only (the answer's line ends "| PLANE").</summary>
     public static bool AboutPlane(string answer) => answer.Contains("| PLANE", StringComparison.OrdinalIgnoreCase) || answer.Contains("|PLANE", StringComparison.OrdinalIgnoreCase);
 
@@ -87,7 +113,7 @@ public static partial class Debrief
         if (!m.Success)
             return null;
         var skill = Skill(m.Groups[1].Value, skills);
-        var lesson = Regex.Replace(m.Groups[2].Value, @"\s*\|\s*PLANE\s*$", "", RegexOptions.IgnoreCase).Trim().Trim('"');
+        var lesson = Regex.Replace(m.Groups[2].Value, @"\s*\|\s*PLANE\b.*$", "", RegexOptions.IgnoreCase).Trim().Trim('"');
         if (skill == null || lesson.Length is < 10 or > 200 || lesson.Contains('\n'))
             return null;
         // Advice, not a report: the rig's first "lesson" was "Landed 25m off centerline at 1021m down runway 09".
