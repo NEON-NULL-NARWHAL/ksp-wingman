@@ -1,6 +1,7 @@
 // KSP Wingman · tests/KspWingman.Tests/HandlingTests.cs
 // Each plane's own setup: the flight test flown on a simulated plane (it must measure what the simulation is), the
 // setup worked out from it, and the corrections from how its finals went.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Text.Json.Nodes;
 using KspWingman.Mcp;

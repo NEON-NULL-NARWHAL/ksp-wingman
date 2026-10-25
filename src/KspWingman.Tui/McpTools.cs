@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Tui/McpTools.cs
 // The tools, from KspWingman.Mcp started as a child process (the same server Claude Code uses).
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;

@@ -1,4 +1,4 @@
-// KSP Wingman · src/Stubs/ (copied from LUNA EVO Mission Control: AssemblyCSharp/Stubs.cs)
+// KSP Wingman · src/Stubs/AssemblyCSharp/Stubs.cs (copied from LUNA EVO Mission Control's AssemblyCSharp/Stubs.cs)
 // [Patch] Stand-ins with the names and shapes of the few KSP types the patches use, so they build without KSP.
 // Used by: LunaEvo.ClientPatches (compile time only; in the game, KSP's real Assembly-CSharp is used)
 // Guide:   README.md (Building without KSP)

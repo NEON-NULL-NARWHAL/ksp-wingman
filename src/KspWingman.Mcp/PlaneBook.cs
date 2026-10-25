@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/PlaneBook.cs
 // Where each plane's flight test and finals come from: LUNA EVO's tower when there is one (shared by every agent on
 // the server), else what this session measured itself.
+// Guide:   Meat and Potatoes/03-Pilot-And-Handling.md
 
 namespace KspWingman.Mcp;
 

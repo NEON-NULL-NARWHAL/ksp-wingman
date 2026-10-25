@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/ChatTests.cs
 // The bridge's chat numbering (src/KspWingman.Bridge/ChatLog.cs) and how the tools show chat lines.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using KspWingman.Bridge;
 using KspWingman.Mcp;

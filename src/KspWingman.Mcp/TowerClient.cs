@@ -3,6 +3,7 @@
 // seconds, answers the tower's "say intentions", and flies what it's told: a cleared route, a hold, vacating the
 // runway after landing. The tower's messages are kept for status. Each finished flight goes to the tower's knowledge
 // store (Mission Control 2.13+), and the knowledge and learn tools read and add to it.
+// Guide:   Meat and Potatoes/05-Tower-Client.md
 
 using System.Globalization;
 using System.Net.Http.Json;
@@ -48,6 +49,8 @@ public sealed class TowerClient : IDisposable
             {
                 if (e.Kind == "outcome" && e.Data is FlightOutcome o)
                     _ = RecordFlightAsync(o);
+                else if (e.Kind == "place" && e.Data is Place p)
+                    _ = RecordPlaceAsync(p);
             };
         _tower = tower;
         _link = new KrpcLink(host, port);
@@ -57,6 +60,16 @@ public sealed class TowerClient : IDisposable
 
     /// <summary>The tower's last messages for this plane, oldest first (status shows the last).</summary>
     public IReadOnlyList<string> Heard { get { lock (_heard) return _heard.ToList(); } }
+
+    /// <summary>
+    /// Asks to depart (before a launch onto the runway, Mission Control 2.18): null when cleared (or an older tower that
+    /// doesn't answer), else the tower's "hold for departure: ..." words.
+    /// </summary>
+    public async Task<string?> DepartureAsync()
+    {
+        var answers = await SayAsync("departure", "ready for departure, runway 09");
+        return answers.FirstOrDefault(a => a.Contains("hold for departure", StringComparison.Ordinal));
+    }
 
     /// <summary>Asks for an approach. The answer (a clearance or a hold) comes back and is acted on.</summary>
     /// <param name="approach">One to ask for ("RNAV 09 NORTH", "visual"): granted when nobody else is waiting.</param>
@@ -217,7 +230,30 @@ public sealed class TowerClient : IDisposable
         _callSign ??= _link.Wingman<string>("PlayerName");
         var body = (JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(test, Web)!;
         body["callSign"] = _callSign;
+        // Its knowledge card's final approach limits, worked out from the test (Mission Control 2.18 shows them).
+        var setup = PlaneSetup.From(test);
+        body["finalMin"] = setup.MinFinalSpeed;
+        body["finalMax"] = setup.MaxFinalSpeed;
+        body["touchdown"] = setup.LandingSpeed;
+        body["maxSlope"] = setup.MaxGlideSlope;
         await PostRawAsync("v1/test", body);
+    }
+
+    /// <summary>Sends an explored place to the tower (Mission Control 2.18+), for every agent's map.</summary>
+    private async Task RecordPlaceAsync(Place place)
+    {
+        try
+        {
+            _callSign ??= _link.Wingman<string>("PlayerName");
+            await PostRawAsync("v1/place", new JsonObject
+            {
+                ["callSign"] = _callSign, ["latitude"] = place.Latitude, ["longitude"] = place.Longitude, ["ground"] = place.Ground, ["biome"] = place.Biome,
+            });
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or WingmanException or System.Text.Json.JsonException or IOException or System.InvalidOperationException)
+        {
+            // No tower: the place stays in the events only.
+        }
     }
 
     /// <summary>What the tower knows about a plane: its latest flight test (null: none, or an older tower) and its last finals.</summary>
@@ -244,7 +280,8 @@ public sealed class TowerClient : IDisposable
     public static IReadOnlyList<FinalReport> ParseFinals(JsonNode? node) => (node as JsonArray ?? []).OfType<JsonObject>().Take(20)
         .Select(f => new FinalReport(
             f["weaves"] is JsonValue w && w.TryGetValue<int>(out var wi) ? Math.Clamp(wi, 0, 100) : 0,
-            f["high"] is JsonValue h && h.TryGetValue<double>(out var hd) && double.IsFinite(hd) ? Math.Clamp(hd, -10_000, 10_000) : 0)).ToList();
+            f["high"] is JsonValue h && h.TryGetValue<double>(out var hd) && double.IsFinite(hd) ? Math.Clamp(hd, -10_000, 10_000) : 0,
+            f["slope"] is JsonValue s && s.TryGetValue<double>(out var sd) && sd is >= 1 and <= 15 ? sd : null)).ToList();
 
     private async Task<JsonNode?> PostRawAsync(string path, JsonObject body)
     {

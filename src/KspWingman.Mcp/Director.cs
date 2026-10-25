@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Mcp/Director.cs
 // Flies the agent's plane in the background, 20 times a second: holding a heading/altitude/speed, or formation on a player.
+// Guide:   Meat and Potatoes/03-Pilot-And-Handling.md
 
 using System.Globalization;
 using KRPC.Client.Services.SpaceCenter;
@@ -42,7 +43,8 @@ public sealed class Director(string host, int port) : IDisposable
     /// <summary>A new plane on the runway: its setup, and a clean slate for its finals.</summary>
     public void NewFlight(string craft, PlaneSetup setup)
     {
-        (Craft, Setup, Ground) = (craft, setup, null);
+        (Craft, Setup, Ground, Style, FlownStyle) = (craft, setup, null, null, null);
+        Interlocked.Exchange(ref _explored, 0);
         lock (_finals)
             _finals.Clear();
     }
@@ -162,10 +164,62 @@ public sealed class Director(string host, int port) : IDisposable
     /// Lands on a runway (from anywhere in the air), rolls out and stops with the brakes on. <paramref name="approach"/>:
     /// null for the tower's pick, "visual", or an approach's name. The tower's clearance shows up in Clearance.
     /// </summary>
-    public void Land(Runway runway, string? approach = null) => Land(new Landing(runway, approach, setup: Setup));
+    public void Land(Runway runway, string? approach = null) => Land(new Landing(runway, approach, setup: Setup, style: Style));
 
     /// <summary>Lands on a route a tower sent (its fixes, then the final).</summary>
-    public void Land(Runway runway, Approach route) => Land(new Landing(runway, given: route, setup: Setup));
+    public void Land(Runway runway, Approach route) => Land(new Landing(runway, given: route, setup: Setup, style: Style));
+
+    /// <summary>
+    /// The approach the agent chose for this flight's landings (land's finalSpeed and glideSlope), go-arounds included;
+    /// null: the plane's own. A new plane clears it.
+    /// </summary>
+    public ApproachStyle? Style { get; set; }
+
+    /// <summary>The tanks (FlightWatch reads them once a second), for status, free flight and explore.</summary>
+    public FuelGauge Fuel { get; } = new();
+
+    /// <summary>The style the last landing flew (fitted to the plane's limits), for the flight record.</summary>
+    public ApproachStyle? FlownStyle { get; private set; }
+
+    /// <summary>Places this flight explored (explore), for its outcome.</summary>
+    public int Explored => Volatile.Read(ref _explored);
+
+    private int _explored;
+
+    /// <summary>
+    /// Explore: flies to <paramref name="target"/> (its altitude, at 150 m/s, never under 500 m above the ground below)
+    /// and once there calls <paramref name="arrived"/> with what it found, then flies on straight.
+    /// </summary>
+    public void FlyTo(Geo target, Action<Place> arrived)
+    {
+        var there = false;
+        double heading = 0;
+        Start(link =>
+        {
+            var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
+            var g = link.Run(_ => vessel.Flight(vessel.Orbit.Body.ReferenceFrame));
+            var radius = link.Run(_ => vessel.Orbit.Body.EquatorialRadius);
+            var me = new Geo(link.Run(_ => g.Latitude), link.Run(_ => g.Longitude), link.Run(_ => g.MeanAltitude));
+            var ground = me.Altitude - link.Run(_ => g.SurfaceAltitude);
+            var km = Exploring.DistanceKm(radius, me, target);
+            if (!there)
+            {
+                var (n, e) = Formation.Offset(radius, me, target);
+                heading = (Math.Atan2(e, n) * 180 / Math.PI + 360) % 360;
+            }
+            if (!there && km * 1000 < Exploring.Arrived)
+            {
+                there = true;
+                Interlocked.Increment(ref _explored);
+                arrived(new Place(Math.Round(me.Latitude, 4), Math.Round(me.Longitude, 4), Math.Round(ground), link.Run(_ => vessel.Biome)));
+            }
+            _doing = there
+                ? string.Create(CultureInfo.InvariantCulture, $"Exploring: at the point, flying on, heading {heading:0}°, {target.Altitude:0} m.")
+                : string.Create(CultureInfo.InvariantCulture, $"Exploring: {km:0.0} km to go, heading {heading:0}°, {target.Altitude:0} m.");
+            // Terrain under the plane: never lower than 500 m above it (the hills west of KSC rise to a few hundred meters).
+            return new PlaneTarget(heading, Math.Max(target.Altitude, ground + Exploring.MinClearance), 150);
+        }, "Exploring: on the way.");
+    }
 
     /// <summary>Holds: right-hand circles around a point at an altitude, until told otherwise (a tower's hold).</summary>
     public void HoldAt(Geo center, double radius, string fix)
@@ -185,6 +239,7 @@ public sealed class Director(string host, int port) : IDisposable
     {
         var runway = landing.Runway;
         _clearance = null;
+        FlownStyle = landing.Style;
         _lastLanding = null; // this landing's numbers only (the flight record waits for them)
         _touchAndGo = false;
         _touchedDown = false;

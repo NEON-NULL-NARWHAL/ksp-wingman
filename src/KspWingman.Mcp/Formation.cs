@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Formation.cs
 // Flying formation: from where the leader is (as LMP shows them), the heading, altitude and speed that keep the agent in
 // its slot beside them. Pure arithmetic, so it's tested without KSP.
+// Guide:   Meat and Potatoes/03-Pilot-And-Handling.md
 
 namespace KspWingman.Mcp;
 

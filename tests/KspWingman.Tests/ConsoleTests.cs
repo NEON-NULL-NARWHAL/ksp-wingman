@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/ConsoleTests.cs
 // The Wingman console without a model or KSP: chat orders, reading model replies, the agent loop with a fake model.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Text.Json;
 using System.Text.Json.Nodes;

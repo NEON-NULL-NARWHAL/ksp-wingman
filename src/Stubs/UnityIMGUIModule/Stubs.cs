@@ -1,4 +1,4 @@
-// KSP Wingman · src/Stubs/ (copied from LUNA EVO Mission Control: UnityIMGUIModule/Stubs.cs)
+// KSP Wingman · src/Stubs/UnityIMGUIModule/Stubs.cs (copied from LUNA EVO Mission Control's UnityIMGUIModule/Stubs.cs)
 // [Patch] Stand-ins with the names and shapes of the Unity window-drawing calls the in-game LUNA EVO window uses.
 // Used by: LunaEvo.ClientPatches (compile time only; in the game, Unity's real UnityEngine.IMGUIModule is used)
 // Guide:   README.md (Building without KSP)

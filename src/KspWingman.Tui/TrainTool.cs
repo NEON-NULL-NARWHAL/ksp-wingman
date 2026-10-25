@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Tui/TrainTool.cs
 // The pilot model's own tool for training on request (the owner's idea: "train flying fast for 20 minutes"): the
 // console runs it as free flight on that one skill, after the current order.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Text.Json;
 

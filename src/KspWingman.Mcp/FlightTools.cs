@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Mcp/FlightTools.cs
 // The flying tools: launch a craft, point it and set the throttle (kRPC's autopilot), stage, gear, brakes.
+// Guide:   Meat and Potatoes/02-MCP-Tools.md
 
 using System.ComponentModel;
 using System.Globalization;
@@ -62,12 +63,61 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
             return "Not launched: no kerbals are free; they're all aboard other vessels (planes parked beside the runway keep " +
                    "their crew). Recover one: fly it and recover, or in KSP's Tracking Station. Otherwise KSP would stop on a " +
                    "\"No Control\" question nobody can answer from here.";
+        // Another player's plane on the runway: LMP would put this one on top of it (two agents launching in the same
+        // second in the rig: one takeoff veered 35° and was rejected).
+        if (directory == "SPH" && RunwayBusy() is { } who)
+            return $"Not launched yet: {who} is on the runway. Wait for it to take off or clear it (a minute or so), then launch again.";
+        // With LUNA EVO's tower: its departure clearance, one plane at a time (two launching in the same second both found
+        // the runway empty), none while a plane is cleared to land.
+        if (directory == "SPH" && tower.Client is { } client && Departure(client) is { } hold)
+            return $"Not launched yet: {hold} Launch again in a minute or so.";
         space.LaunchVessel(directory, craft, directory == "VAB" ? "LaunchPad" : "Runway", null, true, "");
         director.NewFlight(craft, planes.SetupFor(craft)); // this plane's own numbers, from its flight test
         return $"Launching {craft} on the {(directory == "VAB" ? "launch pad" : "runway")}. It takes a few seconds; then status shows it. " +
                (directory == "SPH" ? "It's on the ground, not flying: next, take_off. " : "It's on the pad: next, stage to launch. ") +
                "Mind LMP's safety bubble: other players can't see the agent within 100 m of the pad or the runway start.";
     });
+
+    /// <summary>
+    /// The player whose vessel is on KSC's runway (on its centerline, on or just over the ground), or null: from LMP's
+    /// player list and their positions, through the bridge. An older bridge can't say: null.
+    /// </summary>
+    private string? RunwayBusy()
+    {
+        try
+        {
+            const double kerbin = 600_000; // the runway is Kerbin's (no active vessel at the Space Center to ask)
+            var frame = new Landing(Runway.Ksc);
+            foreach (var line in krpc.Wingman<IList<string>>("Players"))
+            {
+                var name = line.Split('\t')[0];
+                var p = krpc.Wingman<IList<double>>("PlayerPosition", name);
+                if (p.Count < 3)
+                    continue;
+                var (along, cross) = frame.RunwayFrame(kerbin, new Geo(p[0], p[1], p[2]));
+                if (Math.Abs(cross) < 60 && along > -Landing.TouchdownAfterThreshold - 200 && along < Runway.Ksc.Length - Landing.TouchdownAfterThreshold &&
+                    p[2] < Runway.Ksc.Threshold.Altitude + 30)
+                    return name;
+            }
+        }
+        catch (Exception e) when (e is WingmanException or KRPC.Client.RPCException or System.InvalidOperationException)
+        {
+        }
+        return null;
+    }
+
+    /// <summary>The tower's "hold for departure" words, or null: cleared, or no answer (no tower now: launch on).</summary>
+    private static string? Departure(TowerClient client)
+    {
+        try
+        {
+            return client.DepartureAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or WingmanException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Free kerbals from the bridge, or -1 when it can't say (an older bridge, no game).</summary>
     private int AvailableCrew()
@@ -105,6 +155,38 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         return director.Doing;
     });
 
+    [McpServerTool(Name = "explore"), Description(
+        "Explores (in the air): flies to a point you choose, a bearing and a distance from where the plane is, at an " +
+        "altitude above sea level (never under 500 m above the ground on the way). On arrival it notes what's there (the " +
+        "biome, how high the ground is) for every agent on the server, then flies on straight until told otherwise. " +
+        "Refused, with why, past 60 km from KSC, for legs over 30 km, or when the fuel wouldn't get the plane there and " +
+        "back to KSC with 25% left. knowledge shows the places explored so far.")]
+    public string Explore(
+        [Description("Bearing in degrees from where the plane is (0 north, 90 east).")] double bearing,
+        [Description("How far, in km (1-30).")] double distanceKm,
+        [Description("Altitude in meters above sea level.")] double altitude = 1500) => krpc.Run(connection =>
+    {
+        var vessel = InFlight(connection, out var problem);
+        if (vessel == null)
+            return problem!;
+        if (vessel.Situation != VesselSituation.Flying)
+            return "Not from the ground: take_off first (explore is for the air).";
+        var g = vessel.Flight(vessel.Orbit.Body.ReferenceFrame);
+        var radius = vessel.Orbit.Body.EquatorialRadius;
+        var here = new Geo(g.Latitude, g.Longitude, g.MeanAltitude);
+        var target = Exploring.Move(radius, here, (bearing % 360 + 360) % 360, distanceKm, Math.Clamp(altitude, 300, 10_000));
+        if (Exploring.Check(radius, here, target, g.Speed, director.Fuel.Now) is { } why)
+            return $"Not that leg: {why}.";
+        director.FlyTo(target, place =>
+        {
+            // The place goes to the events (and from there to the tower, for every agent).
+            events.Add("place", $"Explored: {place.Describe(radius)}.", place);
+        });
+        return string.Create(CultureInfo.InvariantCulture,
+            $"Exploring: {distanceKm:0.#} km on {bearing:0}° at {target.Altitude:0} m, to a point {Exploring.FromKsc(radius, target.Latitude, target.Longitude)}.") +
+            " On arrival it notes what's there (a \"place\" event) and flies on.";
+    });
+
     [McpServerTool(Name = "follow"), Description(
         "Flies formation on another player (in the air): keeps the agent's plane in a slot beside them, matching their " +
         "heading, height and speed, and never closer than 30 m. Keeps going until fly, stop_following or stop_flying. " +
@@ -133,10 +215,23 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         "Lands the agent's plane (in the air) on a runway. The tower picks a published approach for where the plane is " +
         "(or give one from approaches), the pilot flies its fixes, then the final down a 4° glide slope, flares, rolls " +
         "out and stops with the brakes on. Goes around by itself if it isn't lined up, and the tower clears it again. " +
-        "Takes a few minutes; status shows how it's going. Runways: \"KSC\" (the Space Center's, landing east).")]
+        "Takes a few minutes; status shows how it's going. Runways: \"KSC\" (the Space Center's, landing east). " +
+        "You may choose the final: a faster one (finalSpeed) when the plane slows well, or a steeper or shallower glide " +
+        "slope, within the plane's limits that status shows (outside them it's fitted to them).")]
     public string Land(
         [Description("Which runway: \"KSC\".")] string runway = "KSC",
-        [Description("An approach's name from approaches (\"RNAV 09 NORTH\" or just \"NORTH\"), \"visual\" for a plain circuit, or leave out for the tower's pick.")] string? approach = null)
+        [Description("An approach's name from approaches (\"RNAV 09 NORTH\" or just \"NORTH\"), \"visual\" for a plain circuit, or leave out for the tower's pick.")] string? approach = null,
+        [Description("Speed (m/s) to fly the final at, slowing to the landing speed by 1.5 km out; leave out for the plane's own.")] double? finalSpeed = null,
+        [Description("Glide slope in degrees (4 is normal; 3 shallow, up to 6 steep); leave out for 4.")] double? glideSlope = null)
+    {
+        // The agent's own choice of final (the owner's idea), fitted to the plane's limits by the landing.
+        director.Style = finalSpeed != null || glideSlope != null ? new ApproachStyle(finalSpeed, glideSlope) : null;
+        var fitted = director.Style is { } asked ? director.Setup.Fit(asked) : null;
+        var note = fitted is { Any: true } ? $" Final: {fitted.Describe()} (limits: {director.Setup.Limits()})." : "";
+        return LandFor(runway, approach) + note;
+    }
+
+    private string LandFor(string runway, string? approach)
     {
         // With LUNA EVO's tower (WINGMAN_TOWER_URL), the tower decides: it clears an approach or holds the plane.
         // An approach named with a tower is a request: granted when nobody else is waiting (free flight practises them).
@@ -375,6 +470,11 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         // On the runway, stopped: the ground test (the owner's idea: ground handling matters), before take_off.
         if (vessel.Situation is VesselSituation.PreLaunch or VesselSituation.Landed && g.Speed < 1)
         {
+            // On the runway itself, with room ahead (about 200 m): not parked beside it on the grass.
+            var (along, cross) = new Landing(Runway.Ksc).RunwayFrame(vessel.Orbit.Body.EquatorialRadius, new Geo(g.Latitude, g.Longitude, g.MeanAltitude));
+            if (Math.Abs(cross) > 25 || along > Runway.Ksc.Length - Landing.TouchdownAfterThreshold - 600 || along < -Landing.TouchdownAfterThreshold - 50)
+                return string.Create(CultureInfo.InvariantCulture,
+                    $"Not here: the ground test runs on the runway, lined up with 600 m ahead (this plane is {Math.Abs(cross):0} m off the centerline). Launch onto the runway first.");
             var name = director.CraftOf(Localized(krpc, vessel.Name));
             if (!string.Equals(director.Craft, name, StringComparison.OrdinalIgnoreCase))
                 director.NewFlight(name, planes.SetupFor(name));
@@ -455,5 +555,7 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
     /// A crashed vessel stays the active one until the next launch, frozen and still "Flying" in kRPC's eyes, with no
     /// parts left (seen in the rig: a sunk plane at 2 m, 265 m/s, nose down, for minutes).
     /// </summary>
-    public static bool Wrecked(Vessel vessel) => vessel.Parts.All.Count == 0;
+    /// A crash can also leave a piece without its cockpit or probe core still "flying" (the rig's Aeris 4A, 2026-10-24):
+    /// nothing can fly it, so it's a wreck too, and a new plane may be launched.
+    public static bool Wrecked(Vessel vessel) => vessel.Parts.All.Count == 0 || vessel.Parts.ModulesWithName("ModuleCommand").Count == 0;
 }

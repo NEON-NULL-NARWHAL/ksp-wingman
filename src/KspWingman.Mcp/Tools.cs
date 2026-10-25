@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Mcp/Tools.cs
 // The tools an agent gets: what the game is doing, who's playing, and LMP's chat.
+// Guide:   Meat and Potatoes/02-MCP-Tools.md
 
 using System.ComponentModel;
 using System.Globalization;
@@ -43,7 +44,13 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
         }
         text.AppendLine("Pilot: " + director.Doing);
         if (director.Craft != null)
+        {
             text.AppendLine($"Setup for the {director.Craft}: {director.Setup.Describe()}");
+            // Its knowledge card's limits: what land's finalSpeed and glideSlope may ask for.
+            text.AppendLine($"Limits for the {director.Craft}: {director.Setup.Limits()}");
+        }
+        if (director.Fuel.Now is { } fuel)
+            text.AppendLine("Fuel: " + fuel.Describe());
         if (tower.Client?.Heard is { Count: > 0 } heard)
             text.AppendLine("Tower: " + heard[^1]);
         else if (director.Active && director.Clearance is { } clearance)
@@ -172,6 +179,18 @@ public sealed class Tools(KrpcLink krpc, Director director, TowerLink tower, Fli
                 foreach (var n in (c["notes"] as System.Text.Json.Nodes.JsonArray ?? []).Select(Str))
                     text.AppendLine($"   - {n}");
             }
+        }
+        // The map the server's agents explored (Mission Control 2.18): explore's planner reads this to pick new ground.
+        if (answer["places"] is System.Text.Json.Nodes.JsonObject places && Int(places["count"]) > 0)
+        {
+            static double D(System.Text.Json.Nodes.JsonNode? n) => n is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<double>(out var d) ? d : 0;
+            var biomes = (places["biomes"] as System.Text.Json.Nodes.JsonArray ?? []).OfType<System.Text.Json.Nodes.JsonObject>()
+                .Select(b => $"{Str(b["biome"])} ({Int(b["places"])})");
+            text.AppendLine($"Explored: {Int(places["count"])} place(s) · biomes: {string.Join(", ", biomes)}");
+            if (places["highest"] is System.Text.Json.Nodes.JsonObject h)
+                text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"   highest ground {D(h["ground"]):0} m ({Str(h["biome"])}) at lat {D(h["latitude"]):0.00} lon {D(h["longitude"]):0.00}"));
+            foreach (var p in (places["recent"] as System.Text.Json.Nodes.JsonArray ?? []).OfType<System.Text.Json.Nodes.JsonObject>())
+                text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"   - {Str(p["biome"])}, ground {D(p["ground"]):0} m, lat {D(p["latitude"]):0.00} lon {D(p["longitude"]):0.00}"));
         }
         if (answer["flights"] is System.Text.Json.Nodes.JsonArray flights && flights.Count > 0)
             text.Append("Your last flights: " + string.Join("; ", flights.OfType<System.Text.Json.Nodes.JsonObject>().Select(f => $"#{Int(f["id"])} {Str(f["result"])} {Str(f["approach"])}".TrimEnd())));

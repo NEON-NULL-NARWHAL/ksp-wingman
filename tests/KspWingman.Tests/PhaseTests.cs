@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/PhaseTests.cs
 // Flight phases and outcomes from readings like the rig's (a landing with a go-around, a taxi, a crash), and the taxi.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using KspWingman.Mcp;
 
@@ -70,6 +71,14 @@ public sealed class PhaseTests
         again.Update(Ground(50, "Landing, rolling out"), T0.AddMinutes(1));
         again.Update(Ground(0), T0.AddMinutes(2));
         Assert.Equal(Phase.TakingOff, again.Update(Ground(30), T0.AddMinutes(3))!.Value.To);
+
+        // A bounce on touchdown is still the landing (the rig: a 0 m landing recorded as "landed off a runway").
+        var bounce = new PhaseTracker();
+        bounce.Update(Air(0), T0);
+        bounce.Update(new PhaseInput(true, "Flying", false, 75, -1, 5, "Landing, flaring: 23 m past the touchdown point"), T0.AddMinutes(1));
+        Assert.Null(bounce.Update(new PhaseInput(true, "Flying", false, 70, 1, 2, "Landing, rolling out: 300 m past the touchdown point"), T0.AddMinutes(1.1)));
+        Assert.Equal(Phase.RollingOut, bounce.Update(Ground(60, "Landing, rolling out: 400 m past the touchdown point"), T0.AddMinutes(1.2))!.Value.To);
+        Assert.Equal("landed", bounce.Update(Ground(0, "Landing, rolling out: 1100 m past"), T0.AddMinutes(2))!.Value.Outcome!.Result);
     }
 
     [Fact]

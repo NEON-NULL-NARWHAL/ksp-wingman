@@ -2,6 +2,7 @@
 // Flight plans the agent files itself (the owner's idea): LUNA EVO's tower publishes its table (fixes, the legs allowed
 // between them, the final fixes); the planner reads it as text, picks fixes like a pilot reading the charts, and code
 // checks the plan with the tower's own rules before filing it.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Globalization;
 using System.Text;

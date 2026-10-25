@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Tui/Learner.cs
 // Runs the debrief and free flight (Learning.cs) with the console's tools, planner and events.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Globalization;
 using System.Text.Json.Nodes;
@@ -14,6 +15,9 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
     public TimeSpan Settle { get; init; } = TimeSpan.FromSeconds(8);
 
     public TimeSpan Poll { get; init; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>How long to wait between tries when another plane is on the runway.</summary>
+    public TimeSpan RunwayWait { get; init; } = TimeSpan.FromSeconds(20);
 
     /// <summary>
     /// The debrief of the flight recorded in a "knowledge" event: the planner writes a lesson, code checks it, and learn
@@ -104,6 +108,7 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             tried.Add(craft);
             var launchCraft = craft;
             string? groundTested = null; // a new plane's ground test, for its notes
+            (bool Air, bool Ground) known = (false, false); // what the server's agents already tested
             if (goal.Approach == "craft")
             {
                 // A plane it hasn't flown this session (the knowledge store decides if it's new to this agent).
@@ -121,7 +126,21 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 launchCraft = next;
                 tried.Add(next);
                 if (status.Contains("(Flying)", StringComparison.Ordinal))
-                    status = ""; // a new plane means a new launch
+                {
+                    // A new plane means a new launch, and launching waits for this one to be down: land it first
+                    // (switching to "try different planes" mid-flight in Mission Control stopped free flight at once).
+                    say("free", "Landing this plane first, then a new one.");
+                    var before = hub.Last;
+                    await Call("land", None, cancel);
+                    var landBy = DateTime.UtcNow.AddMinutes(25);
+                    while (hub.After(before, "outcome") == null && DateTime.UtcNow < landBy && !interrupted() && !cancel.IsCancellationRequested)
+                        await Task.Delay(Poll, cancel);
+                    if (interrupted())
+                        return "Free flight stopped for an order.";
+                    status = await tools.CallAsync("status", None, cancel);
+                    if (status.Contains("(Flying)", StringComparison.Ordinal))
+                        return "Free flight stopped: the plane didn't land in 25 minutes, so no new one could be launched.";
+                }
             }
             if (!status.Contains("(Flying)", StringComparison.Ordinal))
             {
@@ -129,11 +148,19 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                     status.Contains("destroyed", StringComparison.Ordinal))
                     await Call("recover", None, cancel);
                 var launched = await Call("launch", new Dictionary<string, object?> { ["craft"] = launchCraft, ["site"] = "Runway" }, cancel);
+                // Another plane on the runway: wait for it (up to three minutes), as a pilot holds short.
+                for (var wait = 0; launched.StartsWith("Not launched yet", StringComparison.Ordinal) && wait < 9 && !interrupted(); wait++)
+                {
+                    await Task.Delay(RunwayWait, cancel);
+                    launched = await Call("launch", new Dictionary<string, object?> { ["craft"] = launchCraft, ["site"] = "Runway" }, cancel);
+                }
                 if (launched.StartsWith("Not launched", StringComparison.Ordinal))
                     return "Free flight stopped: " + launched.Split('\n')[0].Trim();
                 await Task.Delay(Settle, cancel);
-                // A new plane: its ground handling first, on the runway (the owner's idea).
-                groundTested = goal.Approach == "craft" ? await TestAsync(hub.Last, TimeSpan.FromMinutes(3), interrupted, cancel) : null;
+                // A new plane: its ground handling first, on the runway (the owner's idea), unless the server's agents
+                // already tested it (status shows where its setup came from).
+                known = goal.Approach == "craft" ? Tested(await tools.CallAsync("status", None, cancel)) : (false, false);
+                groundTested = goal.Approach == "craft" && !known.Ground ? await TestAsync(hub.Last, TimeSpan.FromMinutes(3), interrupted, cancel) : null;
                 var off = await Call("take_off", new Dictionary<string, object?> { ["heading"] = 90.0, ["altitude"] = 900.0 }, cancel);
                 if (off.StartsWith("Takeoff rejected", StringComparison.Ordinal) && ++rejected < 2)
                 {
@@ -158,7 +185,7 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             var ceiling = limits.CeilingM;
             string? tested = null; // the flight test's results (a new plane), for its notes
             if (goal.Approach == "craft")
-                tested = string.Join(" ", new[] { groundTested, await TestAsync(mark, TimeSpan.FromMinutes(9), interrupted, cancel) }.OfType<string>()) is { Length: > 0 } both ? both : null;
+                tested = string.Join(" ", new[] { groundTested, known.Air ? null : await TestAsync(mark, TimeSpan.FromMinutes(9), interrupted, cancel) }.OfType<string>()) is { Length: > 0 } both ? both : null;
             if (goal.Approach == "fast")
                 await FastLegsAsync(interrupted, cancel);
             else if (goal.Approach == "high")
@@ -166,17 +193,26 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 ceiling = 8000; // the box's ceiling, for this drill only
                 await ClimbHighAsync(interrupted, cancel);
             }
-            if (goal.Approach is "fast" or "high" or "craft")
+            var radius = limits.RadiusKm;
+            if (goal.Approach == "explore")
+            {
+                // The planner's own legs (free will), each checked by the explore tool; then home to land.
+                radius = Math.Max(radius, Drills.ExploreRangeKm + 5);
+                await ExploreAsync(interrupted, cancel);
+            }
+            if (goal.Approach is "fast" or "high" or "craft" or "explore")
                 await Call("land", goal.Approach == "craft" ? new Dictionary<string, object?> { ["approach"] = "visual" } : None, cancel);
             else if (goal.Approach == "plan")
                 await FileOwnPlanAsync(cancel);
+            else if (goal.Approach == "variety")
+                await Call("land", await ChooseStyleAsync(cancel), cancel);
             else
                 await Call("land", new Dictionary<string, object?> { ["approach"] = goal.Approach }, cancel);
 
-            // Wait for the flight's outcome, keeping the plane in the box.
+            // Wait for the flight's outcome, keeping the plane in the box (explore's is wider, and it may take longer).
             (long Id, string Kind, string Text, JsonNode? Data)? outcome = null;
             var sentBack = false;
-            var deadline = DateTime.UtcNow.AddMinutes(25);
+            var deadline = DateTime.UtcNow.AddMinutes(goal.Approach == "explore" ? 40 : 25);
             while (outcome == null && DateTime.UtcNow < deadline && !cancel.IsCancellationRequested)
             {
                 if (interrupted())
@@ -184,7 +220,7 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 await Task.Delay(Poll, cancel);
                 outcome = hub.After(mark, "outcome");
                 if (!sentBack && FreeFlight.Where(await tools.CallAsync("status", None, cancel)) is { } where &&
-                    (where.Km > limits.RadiusKm || where.Altitude > ceiling))
+                    (where.Km > radius || where.Altitude > ceiling))
                 {
                     sentBack = true;
                     say("free", string.Create(CultureInfo.InvariantCulture, $"Outside the box ({where.Km:0} km out, {where.Altitude:0} m): sent back to land."));
@@ -192,7 +228,7 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
                 }
             }
             if (outcome is not { } o)
-                return "Free flight stopped: no outcome after 25 minutes.";
+                return $"Free flight stopped: no outcome after {(goal.Approach == "explore" ? 40 : 25)} minutes.";
             var result = o.Data?["result"] is JsonValue r && r.TryGetValue<string>(out var rs) ? rs : "";
             crashes = result is "crashed" or "splashed" ? crashes + 1 : 0;
             if (crashes >= limits.MaxCrashesInARow)
@@ -221,6 +257,94 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             }
         }
         return interrupted() ? "Free flight stopped for an order." : "Free flight over.";
+    }
+
+    private readonly List<string> _stylesTried = [];
+
+    /// <summary>
+    /// Explore (the owner's "free" free flight): the planner picks each leg (bearing, distance, altitude) from where the
+    /// plane is, what's been explored and the fuel; the explore tool checks and flies it; on to the next once there.
+    /// Home on HOME, low fuel, after <see cref="Drills.MaxLegs"/> legs, or after two refused legs in a row.
+    /// </summary>
+    private async Task ExploreAsync(Func<bool> interrupted, CancellationToken cancel)
+    {
+        string? refused = null;
+        var refusals = 0;
+        for (var leg = 1; leg <= Drills.MaxLegs && !interrupted() && !cancel.IsCancellationRequested; leg++)
+        {
+            var status = await tools.CallAsync("status", None, cancel);
+            if (FuelLeft(status) is { } fuel && fuel < Drills.FuelReserve + 0.1)
+            {
+                say("free", $"Explore: fuel down to {fuel * 100:0}%, heading home.");
+                return;
+            }
+            string answer;
+            try
+            {
+                answer = await planner.AskAsync(Drills.ExploreSystem, Drills.ExplorePrompt(status, await tools.CallAsync("knowledge", None, cancel), leg, refused), cancel);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
+            {
+                return;
+            }
+            if (Drills.Home(answer) || Drills.ParseLeg(answer) is not { } next)
+            {
+                say("free", "Explore: heading home (" + OneLine(answer) + ").");
+                return;
+            }
+            var mark = hub.Last;
+            var flown = await Call("explore", new Dictionary<string, object?> { ["bearing"] = next.Bearing, ["distanceKm"] = next.Km, ["altitude"] = next.Altitude }, cancel);
+            if (flown.StartsWith("Not", StringComparison.Ordinal))
+            {
+                refused = flown;
+                if (++refusals >= 2)
+                    return;
+                leg--; // a refused leg isn't a leg
+                continue;
+            }
+            (refused, refusals) = (null, 0);
+            // There at 150 m/s, with room for the climb and the turn.
+            var by = DateTime.UtcNow.AddSeconds(next.Km * 1000 / 150 * 1.5 + 90);
+            while (hub.After(mark, "place") == null && hub.After(mark, "outcome") == null && DateTime.UtcNow < by && !interrupted())
+                await Task.Delay(Poll, cancel);
+            if (hub.After(mark, "outcome") != null)
+                return; // the flight ended (a crash)
+            if (hub.After(mark, "place") is { } found)
+                say("free", found.Text);
+        }
+    }
+
+    /// <summary>The fuel left (0-1) from status's "Fuel: 63% fuel..." line, or null.</summary>
+    public static double? FuelLeft(string status)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(status, @"Fuel: (\d+)% fuel");
+        return m.Success ? double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) / 100 : null;
+    }
+
+    /// <summary>Approach variety: the planner picks a riskier final (free will); land gets it, fitted to the plane.</summary>
+    private async Task<Dictionary<string, object?>> ChooseStyleAsync(CancellationToken cancel)
+    {
+        var status = await tools.CallAsync("status", None, cancel);
+        string answer;
+        try
+        {
+            answer = await planner.AskAsync(Drills.StyleSystem, Drills.StylePrompt(status, _stylesTried), cancel);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
+        {
+            answer = "";
+        }
+        var style = Drills.ParseStyle(answer, _stylesTried);
+        _stylesTried.Add(style);
+        say("free", $"Trying a {style} final.");
+        return Drills.LandArguments(style, status);
+    }
+
+    /// <summary>Whether the plane's setup (status's "Setup for ...: ... (from ...)") came from a flight test, a ground test.</summary>
+    public static (bool Air, bool Ground) Tested(string status)
+    {
+        var setup = status.Split('\n').FirstOrDefault(l => l.Trim().StartsWith("Setup for", StringComparison.Ordinal)) ?? "";
+        return (setup.Contains("its flight test", StringComparison.Ordinal), setup.Contains("ground test", StringComparison.Ordinal));
     }
 
     /// <summary>

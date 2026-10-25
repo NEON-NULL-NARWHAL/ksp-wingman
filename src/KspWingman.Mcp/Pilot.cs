@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Pilot.cs
 // The plane pilot: holds a heading, altitude and speed with the elevator, ailerons and throttle (kRPC's own autopilot,
 // made for rockets, dove a plane into the ground).
+// Guide:   Meat and Potatoes/03-Pilot-And-Handling.md
 
 namespace KspWingman.Mcp;
 

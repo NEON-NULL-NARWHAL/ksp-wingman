@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Phases.cs
 // What the agent's plane is doing, as a flight phase, from its own numbers (not from status text), and the outcome of
 // each flight. Pure: FlightWatch feeds it once a second; tests feed it recorded flights.
+// Guide:   Meat and Potatoes/02-MCP-Tools.md
 
 namespace KspWingman.Mcp;
 
@@ -38,9 +39,11 @@ public readonly record struct PhaseChange(Phase From, Phase To, FlightOutcome? O
 /// <param name="Craft">The vessel's name.</param>
 /// <param name="MaxSpeed">The fastest it flew (m/s), and <paramref name="MaxHeight"/> the highest above the ground (m).</param>
 /// <param name="Finals">How each final went (weaving, height 1 km out), from the pilot.</param>
+/// <param name="Style">The approach the agent chose ("steep 6°, final 125 m/s"), or null for the plane's own.</param>
+/// <param name="FuelUsed">Fuel burned on the flight (0-1 of the plane's tanks), and <paramref name="FuelLeft"/> what was left.</param>
 public sealed record FlightOutcome(string Result, double Minutes, int GoArounds, string? Approach, LandingResult? Landing,
     IReadOnlyList<string>? Phases = null, string? Craft = null, double MaxSpeed = 0, double MaxHeight = 0,
-    IReadOnlyList<FinalReport>? Finals = null);
+    IReadOnlyList<FinalReport>? Finals = null, string? Style = null, double? FuelUsed = null, double? FuelLeft = null, int Explored = 0);
 
 /// <summary>Where a landing stopped: meters down the runway from the threshold, off the centerline, and the heading error.</summary>
 public sealed record LandingResult(string Runway, double DownRunway, double OffCenterline, double HeadingError);
@@ -137,6 +140,10 @@ public sealed class PhaseTracker
         {
             if (s.Pilot.StartsWith("Taxiing", StringComparison.Ordinal))
                 return Phase.Taxiing;
+            // The landing's own rollout, even after a bounce made it "cruising" for a moment (the rig: a perfect landing
+            // recorded as "landed off a runway": rolling after "cruising" looked like a takeoff, then it parked).
+            if (s.Pilot.StartsWith("Landing, rolling out", StringComparison.Ordinal))
+                return s.Speed < 1 ? Phase.Stopped : Phase.RollingOut;
             // Parked after taxiing, even while the brakes still bite (the rig: 8.7 m/s to 0 in two seconds). Only right
             // after the taxi: the words stay in the pilot's line after a recovery, and held a new plane's whole takeoff
             // roll at Stopped in the rig.
@@ -150,7 +157,8 @@ public sealed class PhaseTracker
         }
         // In the air: the pilot's mode first, then the numbers.
         var p = s.Pilot;
-        if (p.StartsWith("Landing, flaring", StringComparison.Ordinal))
+        // A bounce (a hop of a few meters after touchdown) is still the landing.
+        if (p.StartsWith("Landing, flaring", StringComparison.Ordinal) || p.StartsWith("Landing, rolling out", StringComparison.Ordinal))
             return Phase.Flaring;
         if (p.StartsWith("Landing, on final", StringComparison.Ordinal))
             return Phase.OnFinal;

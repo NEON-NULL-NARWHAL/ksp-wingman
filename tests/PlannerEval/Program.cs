@@ -6,6 +6,7 @@
 //                    [--flights knowledge.json] [--report report.md] [--no-think]
 // New kinds of planning (routes, missions) get a scenario list here first: bigger models can be tried on them long
 // before they fly.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Diagnostics;
 using System.Globalization;

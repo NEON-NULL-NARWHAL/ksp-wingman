@@ -10,10 +10,12 @@ locks, so it can only ever fly its own craft. It talks with you in LMP's chat.
 A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control).
 
 > [!NOTE]
-> **Version 0.4: the tower.** The agent chats, takes off, flies where it's told, flies formation on you, and lands
-> on KSC's runway on published approaches that a tower clears it for; a model on your own PC can be the pilot (the
-> Wingman console, below). Next: taking over a craft you hand it, missions you approve, rescues
-> ([research notes](docs/RESEARCH.md)).
+> **Version 0.12: explore, riskier approaches, fuel.** The agent chats, takes off, flies where it's told, flies
+> formation on you, and lands on KSC's runway on the approaches a tower clears it for (or its own flight plan). It
+> practises on its own and learns from every flight; it **tests each new plane** on the ground and in the air and flies
+> it with that plane's own setup; it can **explore** the map on legs it chooses, try **riskier finals** within its
+> plane's limits, and watches its **fuel**. A model on your own PC can be the pilot (the Wingman console, below).
+> Next: taking over a craft you hand it, missions you approve, rescues ([research notes](docs/RESEARCH.md)).
 
 ![The agent's plane (front) flying formation on another player's, over the sea east of KSC](docs/formation.png)
 
@@ -77,12 +79,15 @@ A **LUNA Evolved** project, from the makers of [LUNA EVO Mission Control](https:
 | `test_plane` | Tests the plane (0.11). On the runway, stopped: a ground test (a roll with the nose wheel straight, a steering pulse, a brake stop; about a minute). In the air: a flight test (an elevator and an aileron pulse, a 180° turn, slowing at idle to its slowest speed, full throttle; about four minutes from 1,500 m). From the numbers the pilot sets itself up for that plane (steering, rotate, approach and landing speeds); with LUNA EVO's tower every agent gets them. `status` shows the setup. |
 | `fly` | Flies the plane at a heading, altitude and speed, and keeps it there. Turns by banking, at most 30°. |
 | `follow` | Formation on another player: a slot to their right, behind, above (default 40 m right, 50 m behind), never closer than 30 m. From further than 2 km it flies straight at them first (even head-on), and closes no faster than it can slow down again. |
-| `land` | Lands on KSC's runway (landing east) from anywhere in the air. The tower clears a published approach for where the plane is (or give one, or `"visual"` for a plain circuit); the pilot flies its fixes, then the final down a 4° glide slope, flares, rolls out on the centerline and brakes. Goes around by itself if it isn't lined up, is too high, or the ground comes up too close, and the tower clears it again. Takes a few minutes. |
+| `land` | Lands on KSC's runway (landing east) from anywhere in the air. The tower clears a published approach for where the plane is (or give one, or `"visual"` for a plain circuit); the pilot flies its fixes, then the final down a 4° glide slope, flares, rolls out on the centerline and brakes. Goes around by itself if it isn't lined up and on the slope by 600 m before touchdown (it risks the landing until then), or the ground comes up too close, and the tower clears it again; brakes by the runway left, and goes around from the runway when it can't stop. `finalSpeed` and `glideSlope` choose the final (0.12), within the plane's limits. Takes a few minutes. |
+| `explore` | Flies to a point it chooses (0.12): a bearing and a distance from where the plane is, at an altitude; notes what's there (the biome, the ground's height) for every agent, then flies on. Refused past 60 km from KSC, for legs over 30 km, or without the fuel to get there and back with 25% left. |
 | `approaches` | The published approaches and their fixes, with the height and speed to cross each at (see [the tower](#the-tower-and-its-approaches)). |
 | `stop_following` | Holds the current heading, height and speed. |
 | `stage`, `set_controls`, `stop_flying`, `recover` | Next stage; brakes, gear, SAS, lights; hand the vessel back; recover a landed vessel. |
 | `knowledge` | What the server's agents know (LUNA EVO's tower, 0.7): the skills (take off, fly a route, hold, land visual, land RNAV, land in sequence), how many of your flights and everyone's went well, which are open to practise, the lessons earlier flights taught (facts, not orders), and your last flights. |
 | `learn` | Saves a lesson for every agent on the server, citing one of your flights that showed it (refused without one). The console's debrief uses it; the model doesn't get it. |
+| `procedures` | The tower's published table (0.9): its fixes, the legs between them and the final fixes, for a flight plan of the agent's own. Free flight's planner uses it; the model doesn't get it. |
+| `file_plan` | Files a flight plan (fix names, e.g. `KSC-OH KSC-N1 KSC-N2 KSC-N3 F09`) with LUNA EVO's tower: it's checked against the table and cleared as filed, or the tower says why not. Free flight uses it; the model doesn't get it. |
 | `events` | What happened since an event number, as JSON lines: flight phases (parked, taking off, climbing, cruising, on a route, holding, on final, flaring, rolling out, stopped, taxiing, crashed...), each flight's outcome (landed and where on the runway, crashed, splashed, go-arounds, the approach flown) and the tower's messages. For apps watching agents; the console shows them too. |
 
 ### The tower and its approaches
@@ -132,7 +137,7 @@ only ever controls its own KSP; LMP's locks keep it off everyone else's vessels.
 uses the same tools.
 
 ```
-KspWingman --model qwen3:4b-instruct --krpc-port 50000 --allow "YourName,FriendName"
+KspWingman --model gemma4:e4b --planner-model gemma4:e4b --krpc-port 50000 --allow "YourName,FriendName"
 ```
 
 **Orders** come from the console (type "take off and fly east at 1000 m") or from LMP's chat: players on `--allow`
@@ -166,11 +171,26 @@ finished flight is graded on the server, and the **debrief** follows: the planne
 one lesson ("On RNAV 09 SOUTH, slow to 85 m/s before F09 to avoid a go-around"), which code checks and saves citing the
 flight. Every agent on the server then sees it in `knowledge`. Debriefs also follow ordinary flights.
 
+**Training (0.9-0.12).** `/train <what> [minutes]` (or `{"type":"train","focus":...}`, or asking the pilot in plain
+words: it has a `train` tool) practises one thing until it has 3 good flights in a row: `landings`, `fast`, `high`,
+`planes` (a plane it hasn't flown: tested on the ground and in the air first, then flown with its own setup, and the
+planner writes a note on how it differs), `plans` (its own flight plan from the tower's table), `approaches` (a
+riskier final it picks: steep, shallow, fast, slow or long, within the plane's limits) or `explore` (it picks each leg,
+a bearing, distance and height; code checks range and fuel; it notes what's there for every agent, then lands). Free
+flight's menu has all of them.
+
+**Each plane's own setup (0.11).** `test_plane` measures a plane (on the runway: its nose wheel, how it veers, its
+brakes; in the air: how quickly it pitches and rolls, its slowest speed, how it slows and speeds up), and the pilot
+flies it with its own gains and speeds, corrected by how its finals go (weaving, arriving high). Its **limits** (the
+final approach speeds, touchdown speed and the steepest glide slope it can take) are on `status`, and `land` takes a
+`finalSpeed` and `glideSlope` within them. With LUNA EVO's tower the tests are kept for every agent.
+
 **`--ipc`:** the console reads `{"type":"order","text":"land at KSC","from":"Commander"}`, `{"type":"status"}`,
-`{"type":"forget"}`, `{"type":"free","minutes":30}`, `{"type":"stop-free"}` or `{"type":"quit"}` (quits without asking), one a line (plain text is an order), and writes
+`{"type":"forget"}`, `{"type":"free","minutes":30}`, `{"type":"train","focus":"explore","minutes":30}`, `{"type":"stop-free"}` or `{"type":"quit"}` (quits without asking), one a line (plain text is an order), and writes
 everything as `{"type":"event","time":...,"kind":...,"text":...,"data":...}`: kinds `order`, `chat`, `call`, `result`,
 `answer`, `status`, `error`, `wingman`, `free`, `debrief`, and every 2 s the MCP server's events: `phase`, `flight` (an
-outcome), `tower`, `knowledge` (the flight's grades) and `lesson`. [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control) 2.12 installs
+outcome), `tower`, `knowledge` (the flight's grades), `lesson`, `test` (a plane's test results) and `place` (an
+explored place). [LUNA EVO Mission Control](https://github.com/NEON-NULL-NARWHAL/luna-evo-mission-control) 2.12 installs
 Wingman, its mod and a model, and runs agents this way (rail: Play → Wingman).
 
 **In the console:** `/status` (where the agent is), `/forget` (clears the conversation), `/quit`. While the pilot is
@@ -235,6 +255,9 @@ dotnet run --project tests/PlannerEval -- --models qwen3:4b,qwen3:8b,gemma4:e4b 
   sends the model the orders and the tools, and runs the tools it asks for.
 - Nothing new goes over LMP's network: the agent is a normal LMP player.
 
+The maintainer's guide, chapter by chapter (the pilot, landing, the tower client, learning, explore and fuel, the
+bridge, tests, releases, gotchas), is in [Meat and Potatoes](Meat%20and%20Potatoes/README.md).
+
 ## Building it
 
 .NET 10 SDK, then `dotnet build KspWingman.slnx` and `dotnet test KspWingman.slnx`. No KSP needed: kRPC and LMP's
@@ -245,8 +268,8 @@ Tools for working on it, against a real KSP:
 
 - `tests/mcp_smoke.py <KspWingman.Mcp.exe> <kRPC port> tool[:json] ... sleep:N` talks MCP to the server like an
   agent's host would, e.g. `"take_off:{\"altitude\":600}" "land:{}" sleep:10 status`.
-- `tests/FlightLab <kRPC port> probe|hold|show|wreck|camera` flies or inspects the plane straight through kRPC, for
-  tuning the pilot.
+- `tests/FlightLab <kRPC port> probe|hold|steps|test|ground|show|wreck|camera` flies or inspects the plane straight
+  through kRPC, for tuning the pilot (`test` and `ground` measure the Aeris 3A's reference numbers).
 - `tests/ModelEval` (above) scores a model without KSP.
 
 ## How it was made
@@ -257,7 +280,11 @@ other player's reply reached the agent. Version 0.2 was flown in the same rig: t
 holding a course and the other taking off and joining it in formation (and, on the way there, crashing a few planes
 into the sea; the fixes are in the changelog). Version 0.3 too: `land` from anywhere in the air, and a local 4B model
 taking orders from the other player's chat, launching, taking off and landing. Version 0.4: four landings on the
-tower's approaches, each lined up the first time; the rollout was tuned from the recordings.
+tower's approaches, each lined up the first time; the rollout was tuned from the recordings. Since then, every
+version was flown by two agents in the rig with LUNA EVO's tower: free flight and the debrief (0.7), runway in sight
+(0.8), training, flight plans and the overhead hold (0.9), go-arounds resequenced (0.10), flight tests that turned the
+Aeris 4A, which had never landed, into a plane landing 7 m off the centerline (0.11), and explore and riskier finals
+(0.12).
 
 ## License
 

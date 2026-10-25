@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/ApproachTests.cs
 // Published approaches: the tower's pick, the clearance, the route flown in a small simulation, and the rollout.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using KspWingman.Mcp;
 

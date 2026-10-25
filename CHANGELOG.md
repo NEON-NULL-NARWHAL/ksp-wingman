@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.12.0 (2026-10-24): explore, riskier approaches, fuel
+
+### Added
+- **`explore`** (the owner's idea: a freer free flight that learns the map): flies to a point the agent chooses, a
+  bearing and a distance from where it is, at an altitude, never under 500 m above the ground below; on arrival notes
+  the place (its biome, the ground's height) for every agent (LUNA EVO's tower, 2.18). Refused past 60 km from KSC, for
+  legs over 30 km, or without the fuel to get there and back with 25% left.
+- **The Explore and Approach variety drills** (`/train explore`, `/train approaches`, and on free flight's menu): the
+  planner picks each explore leg (or HOME) from where the plane is, its fuel and what's been explored, and a riskier
+  final (steep, shallow, fast, slow or long) from the plane's limits; code checks and flies them.
+- **Final approach limits** (each plane's knowledge card): final speeds from its landing speed up to what it can still
+  slow down from, glide slopes 3° up to 6° (by how well it slows); `status` shows them, and **`land` takes `finalSpeed`
+  and `glideSlope`** within them (a plane that slows well may come in faster or steeper). A steep final flies level
+  until it meets its slope.
+- **Fuel**: `status` shows the tanks and the endurance at this burn; flight records carry the fuel used and left;
+  explore heads home below 35%.
+- Flight records carry the chosen approach style and the places explored; tests send the plane's limits to the tower.
+- [Meat and Potatoes](Meat%20and%20Potatoes/README.md): the maintainer's guide, chapter by chapter, and every source
+  file's header points to its chapter.
+
+### Fixed
+- **Switching to "different planes" in the air** stopped free flight ("still flying"): it lands this plane first.
+- **A crash that left a piece without its cockpit "flying"** blocked new launches: that's a wreck now.
+- **The ground test could run beside the runway** (parked on the grass after vacating): only on the runway, lined up.
+- Plane notes kept what a model wrote after its markers ("| Aeris 4A"); a plane the server already tested was tested
+  again every round.
+- The README's banner, tools (`procedures`, `file_plan`, `explore`) and history are current.
+
+### In the test rig
+- Explore: the planner chose every leg itself (north-west over the hills, north-east, south-east out to sea), 12 places
+  in three flights (Grasslands, Highlands 703 m, Shores, Water), and each flight came back to land 1 m off the centerline.
+- Approach variety: a steep final (fitted to 4.5°) landed 1 m off, a fast one 0 m off; the departure clearance kept two
+  agents launching in the same second apart.
+- **Two agents launching in the same second** put both planes at the runway start (one veered 35° and was rejected):
+  `launch` waits while another player's plane is on the runway ("Not launched yet"), and, with LUNA EVO's tower (2.18),
+  asks for its departure clearance first; training tries again for up to three minutes.
+- **A bounce on touchdown made a perfect landing "landed off a runway"** (rolling after a hop looked like a takeoff, then
+  it parked): the pilot's own "rolling out" now counts, in the air and on the ground.
+- **Steep finals beyond the plane**: the Aeris 3A stayed 40 m above a 5° slope at the decision point on every try, so
+  its limit is 4.5° (6° only for planes that slow well), and a plane's card **learns from its finals**: a steep final
+  that still arrives high caps its glide slope half a degree lower.
+
 ## 0.11.0 (2026-10-24): flight tests and each plane's own setup
 
 ### Added

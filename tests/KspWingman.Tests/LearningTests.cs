@@ -1,6 +1,7 @@
 // KSP Wingman · tests/KspWingman.Tests/LearningTests.cs
 // The debrief, free flight's menu and choices, its box, and a whole free-flight session with fake tools and a fake
 // planner: the planner picks, code flies, the flight is recorded and debriefed, an order stops it.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Text.Json.Nodes;
 using KspWingman.Mcp;
@@ -53,12 +54,12 @@ public sealed class LearningTests
         Assert.Equal((3, 4), proficiency["land-rnav"]);
 
         var menu = FreeFlight.Menu([]);
-        Assert.Equal(8, menu.Count); // four landings, a flight plan of its own, and the training drills
+        Assert.Equal(10, menu.Count); // four landings, a flight plan of its own, the training drills, riskier finals, explore
         Assert.Contains("4. land on the short visual (land-visual: 0 of 2 good)", FreeFlight.Prompt(menu, proficiency, 30));
         Assert.Equal(("RNAV 09 SOUTH", "need more south practice"), (FreeFlight.Choose("2 - need more south practice", menu, proficiency).Goal.Approach,
             FreeFlight.Choose("2 - need more south practice", menu, proficiency).Why));
         Assert.Equal("fast", FreeFlight.Choose("I think we should fly", menu, proficiency).Goal.Approach); // no number: a skill never tried first
-        Assert.Equal("fast", FreeFlight.Choose("9", menu, proficiency).Goal.Approach); // not on the menu
+        Assert.Equal("fast", FreeFlight.Choose("12", menu, proficiency).Goal.Approach); // not on the menu
 
         // Failed twice in a row without a lesson: off the menu until something else is practised.
         var visual = FreeFlight.Goals[3];
@@ -100,6 +101,9 @@ public sealed class LearningTests
         /// <summary>What launchable_craft answers ("ok": no SPH line, no planes).</summary>
         public string Craft { get; init; } = "ok";
 
+        /// <summary>How many launches find another plane on the runway first.</summary>
+        public int BusyRunway { get; set; }
+
         /// <summary>The flight test's numbers, as test_plane's "test" event says them.</summary>
         public string Test { get; init; } = "Flight test of the Gull: pitch 36 °/s per full stick (2.0× the Aeris 3A), roll 80 °/s (0.5×), slowest 62 m/s.";
         private bool _flying;
@@ -132,6 +136,9 @@ public sealed class LearningTests
                     return Task.FromResult("Lesson saved on the server.");
                 case "launchable_craft":
                     return Task.FromResult(Craft);
+                case "launch" when BusyRunway > 0:
+                    BusyRunway--;
+                    return Task.FromResult("Not launched yet: RigViewer is on the runway. Wait for it to take off or clear it, then launch again.");
                 case "test_plane":
                     hub.Add("test", Test, null);
                     return Task.FromResult("Flight test of the Gull started (about four minutes).");
@@ -189,11 +196,33 @@ public sealed class LearningTests
 
         // Off in the new plane, the test card, then the landing; the note quotes only what the test measured.
         var order = tools.Calls.SkipWhile(c => c != "take_off").ToList();
-        Assert.Equal(["launch", "test_plane", "take_off"], tools.Calls.SkipWhile(c => c != "launch").Take(3)); // its ground test first
+        Assert.Equal(["launch", "status", "test_plane", "take_off"], tools.Calls.SkipWhile(c => c != "launch").Take(4)); // its ground test first
         Assert.Equal(["take_off", "test_plane"], order.Take(2)); // then the one in the air
         Assert.Contains("land:visual", order);
         Assert.Contains(planner.Prompts, p => p.Contains("A flight test just measured the Gull") && p.Contains("slowest 62 m/s"));
         Assert.Contains(said, s => s.StartsWith("debrief: Plane note (Gull): Roll gently in the Gull", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task With_another_plane_on_the_runway_it_waits_and_launches_after()
+    {
+        // Two agents launching in the same second in the rig: one veered 35° off on the other. Now it holds short.
+        var hub = new EventHub();
+        var tools = new FakeTools(hub) { BusyRunway = 2 };
+        var learner = new Learner(tools, new Planner("1", "NONE"), hub, (_, _) => { }) { Settle = TimeSpan.Zero, Poll = TimeSpan.FromMilliseconds(10), RunwayWait = TimeSpan.Zero };
+        await learner.FreeFlyAsync(30, new FreeFlightLimits(), () => tools.Calls.Count(c => c == "take_off") >= 1, CancellationToken.None);
+        Assert.Equal(3, tools.Calls.Count(c => c == "launch")); // twice refused, then launched
+        Assert.Contains("take_off", tools.Calls);
+    }
+
+    [Fact]
+    public void A_plane_the_server_already_tested_isnt_tested_again()
+    {
+        Assert.Equal((true, true), Learner.Tested("Pilot: Holding.\nSetup for the Gull: elevator ×1.00 ... (from its flight test and its ground test)"));
+        Assert.Equal((false, true), Learner.Tested("Setup for the Gull: nose wheel ×1.20 ... (from its ground test)"));
+        Assert.Equal((false, false), Learner.Tested("Setup for the Gull: ... (from the Aeris 3A's numbers (no flight test))"));
+        // Whatever a model writes after a "|" isn't part of the lesson (gemma4 added "| Aeris 4A" in the rig).
+        Assert.Equal("Pitch rate is 37 °/s; adjust inputs.", Debrief.Parse("SKILL: takeoff | LESSON: Pitch rate is 37 °/s; adjust inputs. | Aeris 4A | PLANE", ["takeoff"])!.Value.Lesson);
     }
 
     [Fact]

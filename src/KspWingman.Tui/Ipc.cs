@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Tui/Ipc.cs
 // The console's --ipc mode, for a host app (LUNA EVO Mission Control's Wingman tab): one JSON object a line in (orders
 // and commands) and out (everything the console would print, plus the MCP server's events: phases, outcomes, tower).
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Text.Json;
 using System.Text.Json.Nodes;

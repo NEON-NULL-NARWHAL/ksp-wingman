@@ -2,6 +2,7 @@
 // The flight test (the owner's idea: learn each plane from real tests, not guesses): a short test card flown by the
 // Director, pulses on the stick and a few steady maneuvers, measuring how the plane handles. Pure like Landing: it
 // reads the plane's numbers and says what to fly, so it's tested without KSP.
+// Guide:   Meat and Potatoes/03-Pilot-And-Handling.md
 
 using System.Globalization;
 

@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/IpcTests.cs
 // The console's --ipc mode: what a host app sends (orders, commands) and what it gets back (one JSON object a line).
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Text.Json.Nodes;
 using KspWingman.Tui;

@@ -1,4 +1,4 @@
-// KSP Wingman · src/Stubs/ (copied from LUNA EVO Mission Control: UnityCoreModule/Stubs.cs)
+// KSP Wingman · src/Stubs/UnityCoreModule/Stubs.cs (copied from LUNA EVO Mission Control's UnityCoreModule/Stubs.cs)
 // [Patch] Stand-ins with the names and shapes of the few Unity types the patches use, so they build without KSP.
 // Used by: LunaEvo.ClientPatches (compile time only; in the game, Unity's real UnityEngine.CoreModule is used)
 // Guide:   README.md (Building without KSP)

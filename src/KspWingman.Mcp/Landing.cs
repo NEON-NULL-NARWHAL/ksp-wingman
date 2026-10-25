@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Landing.cs
 // Landing a plane on a runway: to a point on the extended centerline, down a 4° glide slope, flare, roll out. Pure
 // arithmetic like Formation, so it's tested without KSP.
+// Guide:   Meat and Potatoes/04-Landing-And-Approaches.md
 
 namespace KspWingman.Mcp;
 
@@ -24,7 +25,7 @@ public readonly record struct LandingStep(LandingPhase Phase, PlaneTarget? Targe
 /// (the default), "visual" for the old hand-made circuit, or an approach's name. <paramref name="setup"/>: the plane's
 /// own speeds (Handling.cs); null: the Aeris 3A's.
 /// </summary>
-public sealed class Landing(Runway runway, string? approach = null, Approach? given = null, PlaneSetup? setup = null)
+public sealed class Landing(Runway runway, string? approach = null, Approach? given = null, PlaneSetup? setup = null, ApproachStyle? style = null)
 {
     public const double GlideSlope = 4; // degrees
     public const double FinalDistance = 8000; // m before touchdown where the final approach starts
@@ -38,7 +39,12 @@ public sealed class Landing(Runway runway, string? approach = null, Approach? gi
     private LandingPhase _phase = LandingPhase.ToFinal;
     private bool _outside;
     private readonly PlaneSetup _setup = setup ?? PlaneSetup.Default;
+    // The agent's chosen approach, within the plane's limits (the routes keep their published 4° heights).
+    private readonly ApproachStyle? _style = style is { Any: true } ? (setup ?? PlaneSetup.Default).Fit(style) : null;
     private int _weaves, _side;
+
+    /// <summary>The approach style flown (fitted to the plane), or null for the plane's own.</summary>
+    public ApproachStyle? Style => _style;
     private double? _high;
     private bool _onFinal;
 
@@ -195,7 +201,9 @@ public sealed class Landing(Runway runway, string? approach = null, Approach? gi
         var intercept = along < -3000 ? 45 : 25;
         var correction = Math.Clamp(Math.Atan2(-cross, lookahead) * 180 / Math.PI, -intercept, intercept);
         var course = (runway.Heading + correction + 360) % 360;
-        var glideAltitude = touchdownAltitude + Math.Max(0, -along) * tan;
+        // A chosen slope (steep or shallow) on the final itself.
+        var slopeTan = _style?.GlideSlope is { } slope ? Math.Tan(slope * Math.PI / 180) : tan;
+        var glideAltitude = touchdownAltitude + Math.Max(0, -along) * slopeTan;
         var altitude = plane.Altitude;
 
         // Go around if it can't make it: off the centerline close in, or still flying well past the touchdown point.
@@ -228,12 +236,14 @@ public sealed class Landing(Runway runway, string? approach = null, Approach? gi
         }
 
         _phase = LandingPhase.Final;
-        var sink = -speed * tan + Math.Clamp(0.15 * (glideAltitude - altitude), -_setup.SinkCorrection, 6);
+        var sink = -speed * slopeTan + Math.Clamp(0.15 * (glideAltitude - altitude), -_setup.SinkCorrection, 6);
         // Faster far out, slowing down the slope to the landing speed 1.5 km out, at what this plane can lose (Handling.cs).
-        var approachSpeed = _setup.FinalSpeed(-along);
+        var approachSpeed = _setup.FinalSpeed(-along, _style);
         // 30 degrees of bank far out (20 turned onto final too wide in the rig), 20 near the ground.
         var bank = along < -3000 && heightAboveGround > 300 ? 30 : 20;
-        var final = new PlaneTarget(course, glideAltitude, approachSpeed, ClimbRate: Math.Clamp(sink, -15, 4), Landing: true, MaxBank: bank);
+        // Below a steep slope (the published fixes are at 4° heights), level until it meets it: never climb up to it.
+        var climbCap = slopeTan > tan * 1.1 ? 0 : 4;
+        var final = new PlaneTarget(course, glideAltitude, approachSpeed, ClimbRate: Math.Clamp(sink, -15, climbCap), Landing: true, MaxBank: bank);
         return new LandingStep(_phase, final, along, cross, Describe("on final", along, cross, speed));
     }
 
@@ -260,7 +270,7 @@ public sealed class Landing(Runway runway, string? approach = null, Approach? gi
     {
         if (!_onFinal)
             return;
-        FinalEnded?.Invoke(new FinalReport(_weaves, Math.Round(_high ?? 0)));
+        FinalEnded?.Invoke(new FinalReport(_weaves, Math.Round(_high ?? 0), _style?.GlideSlope));
         (_onFinal, _weaves, _side, _high) = (false, 0, 0, null);
     }
 

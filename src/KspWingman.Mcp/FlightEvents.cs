@@ -2,6 +2,7 @@
 // The agent's events as data: flight phases and outcomes (FlightWatch), the tower's messages (TowerClient). Kept in
 // memory for the events tool (the console's --ipc mode and Mission Control read them) and, with WINGMAN_EVENTS_LOG, as
 // JSON lines in a file.
+// Guide:   Meat and Potatoes/02-MCP-Tools.md
 
 using System.Globalization;
 using System.Text.Json;
@@ -79,6 +80,8 @@ public sealed class FlightWatch : IDisposable
     private readonly FlightEvents _events;
     private readonly PhaseTracker _tracker = new();
     private string? _craft;
+    private double? _fuelLeft, _fuelAtStart; // the tanks (0-1), now and at the takeoff
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private (FlightOutcome Outcome, DateTime Since)? _waiting;
     private readonly CancellationTokenSource _stop = new();
 
@@ -107,13 +110,22 @@ public sealed class FlightWatch : IDisposable
                         return new PhaseInput(true, "Flying", true, 0, 0, 0, _director.Doing);
                     var g = v.Flight(v.Orbit.Body.ReferenceFrame);
                     _craft = _director.CraftOf(FlightTools.Localized(_link, v.Name));
+                    var tanks = v.Resources.Max("LiquidFuel");
+                    _fuelLeft = tanks > 0 ? v.Resources.Amount("LiquidFuel") / tanks : null;
                     return new PhaseInput(true, v.Situation.ToString(), false, g.Speed, g.VerticalSpeed, g.SurfaceAltitude, _director.Doing);
                 });
+                _director.Fuel.Update(input.InFlight && !input.Wrecked ? _fuelLeft : null, _clock.Elapsed.TotalSeconds);
                 if (_tracker.Update(input, DateTime.UtcNow, _director.Approach, _director.LastLanding) is { } change)
                 {
                     _events.Add("phase", $"{change.From} → {change.To}", new { from = change.From.ToString(), to = change.To.ToString() });
+                    if (change.To == Phase.TakingOff && _fuelAtStart == null)
+                        _fuelAtStart = _fuelLeft;
                     if (change.Outcome is { } o)
-                        _waiting = (o with { Craft = _craft }, DateTime.UtcNow);
+                    {
+                        var used = _fuelAtStart is { } start && _fuelLeft is { } now ? Math.Round(Math.Max(0, start - now), 3) : (double?)null;
+                        _waiting = (o with { Craft = _craft, FuelUsed = used, FuelLeft = _fuelLeft is { } l ? Math.Round(l, 3) : null }, DateTime.UtcNow);
+                        _fuelAtStart = null;
+                    }
                 }
                 // A landing's numbers come from the pilot's rollout, which can finish a moment after this watch sees the
                 // plane stopped (the rig: a 10 m landing recorded without them, so graded as not good). Wait for them, 5 s.
@@ -122,7 +134,7 @@ public sealed class FlightWatch : IDisposable
                     var landing = w.Outcome.Landing ?? (w.Outcome.Result == "landed" ? _director.LastLanding : null);
                     if (landing != null || w.Outcome.Result != "landed" || DateTime.UtcNow - w.Since > TimeSpan.FromSeconds(5))
                     {
-                        var o = w.Outcome with { Landing = landing, Finals = _director.Finals };
+                        var o = w.Outcome with { Landing = landing, Finals = _director.Finals, Style = _director.FlownStyle?.Describe(), Explored = _director.Explored };
                         _events.Add("outcome", Describe(o), o);
                         _waiting = null;
                     }

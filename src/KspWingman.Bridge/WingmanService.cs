@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Bridge/WingmanService.cs
 // The kRPC service "Wingman": LMP's chat, players and connection, for an agent that plays through kRPC.
+// Guide:   Meat and Potatoes/08-Bridge.md
 
 using System;
 using System.Collections.Generic;

@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/FlyingTests.cs
 // The pilot's control law and the formation arithmetic, without KSP.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using KspWingman.Mcp;
 

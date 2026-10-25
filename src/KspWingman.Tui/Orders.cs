@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Tui/Orders.cs
 // Orders from LMP's chat: only from players on the allow list, and only when they call the agent by its call sign
 // ("wingman, follow me", "@Wingman land"). Everything else in chat is people talking to each other.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 namespace KspWingman.Tui;
 

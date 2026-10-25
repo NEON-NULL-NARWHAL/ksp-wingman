@@ -8,6 +8,7 @@
 // --ipc: JSON lines in and out, for a host app (Mission Control's Wingman tab); see Ipc.cs.
 // The planner (Learning.cs) picks free-flight goals and writes debriefs; it never flies. Without --planner-model the
 // pilot's model does it. /free [minutes] starts free flight; any order stops it.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Globalization;
 using System.Threading.Channels;

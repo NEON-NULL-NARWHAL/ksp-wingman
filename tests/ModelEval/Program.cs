@@ -2,6 +2,7 @@
 // Development tool: gives a model real orders with KSP Wingman's real tool list (from KspWingman.Mcp) and scripted
 // game answers, and scores whether it calls the right tools with sensible arguments. No KSP needed.
 // Usage: ModelEval <KspWingman.Mcp.exe> <model> [OpenAI-compatible URL, default Ollama] [runs per scenario, default 1]
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Diagnostics;
 using System.Globalization;

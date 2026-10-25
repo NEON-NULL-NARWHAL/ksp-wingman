@@ -4,6 +4,7 @@
 //        FlightLab <kRPC port> ground     (the ground test on the Aeris 3A: the nose wheel reference)
 //        FlightLab <kRPC port> test       (the flight test card on the Aeris 3A: the reference numbers)
 //        FlightLab <kRPC port> steps <rollGain> <pitchGain>   (30° heading steps; FLIGHTLAB_CRAFT picks the plane)
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Globalization;
 using System.Net;

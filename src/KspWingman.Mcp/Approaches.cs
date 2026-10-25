@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Approaches.cs
 // Published approaches (the owner's idea: RNAV routes like real airports), the tower that picks one, and the route
 // follower that flies it. A route ends at the final approach fix; Landing flies the final from there. Pure arithmetic.
+// Guide:   Meat and Potatoes/04-Landing-And-Approaches.md
 
 using System.Globalization;
 

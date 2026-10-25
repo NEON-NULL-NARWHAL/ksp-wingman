@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Bridge/ChatLog.cs
 // Numbers LMP's chat lines as they appear, so an agent can ask "what's new since #12" without seeing a line twice.
+// Guide:   Meat and Potatoes/08-Bridge.md
 
 using System;
 using System.Collections.Generic;

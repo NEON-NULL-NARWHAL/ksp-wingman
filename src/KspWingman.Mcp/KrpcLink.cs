@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Mcp/KrpcLink.cs
 // The connection to kRPC in the agent's KSP: opened on first use, reopened after KSP restarts.
+// Guide:   Meat and Potatoes/01-Architecture.md
 
 using System.Net;
 using KRPC.Client;

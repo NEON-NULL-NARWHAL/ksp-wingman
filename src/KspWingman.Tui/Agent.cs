@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Tui/Agent.cs
 // The agent loop: an order in, the model calls tools until it has an answer, the answer out. Small models need it
 // simple, so the prompt is short and every tool result goes back to the model as plain text.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Text.Json.Nodes;
 

@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Program.cs
 // Starts the MCP server on stdio. Settings (environment): WINGMAN_KRPC_HOST (127.0.0.1), WINGMAN_KRPC_PORT (50000),
 // WINGMAN_TOWER_URL (LUNA EVO Mission Control's KSC tower, e.g. http://localhost:8920/; none: land flies on its own).
+// Guide:   Meat and Potatoes/01-Architecture.md
 
 using KspWingman.Mcp;
 using Microsoft.Extensions.DependencyInjection;

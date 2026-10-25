@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/LandingTests.cs
 // The landing geometry: getting to the final approach, the glide slope, the flare, going around.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using KspWingman.Mcp;
 

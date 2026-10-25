@@ -1,6 +1,7 @@
 // KSP Wingman · src/KspWingman.Mcp/Handling.cs
 // Each plane's own setup (the owner's idea): measured in a flight test (FlightTest), then corrected by how its landings
 // went. The pilot, the landing and take_off read it instead of the Aeris 3A's numbers. Pure, tested without KSP.
+// Guide:   Meat and Potatoes/03-Pilot-And-Handling.md
 
 using System.Globalization;
 
@@ -33,8 +34,27 @@ public sealed record PlaneTest(string Craft, double PitchRate, double RollRate, 
         $"cruises at {CruiseThrottle * 100:0}% throttle at 150 m/s.") + (Ground is { } g ? " " + GroundTest.Describe(Craft, g) : "");
 }
 
-/// <summary>How one of its finals went: centerline crossings (weaving) and how high it was 1 km out (m, + is high).</summary>
-public readonly record struct FinalReport(int Weaves, double High);
+/// <summary>
+/// An approach the agent chose (the owner's idea: try longer, riskier approaches, and speed up when the plane allows):
+/// a final speed (m/s; the ceiling it slows down from) and a glide slope (degrees). Null: the plane's own.
+/// </summary>
+public sealed record ApproachStyle(double? FinalSpeed = null, double? GlideSlope = null)
+{
+    public bool Any => FinalSpeed != null || GlideSlope != null;
+
+    /// <summary>For the flight record ("steep 6°, final 125 m/s"): the tower grades the approaches skill from it.</summary>
+    public string Describe() => string.Join(", ", new[]
+    {
+        GlideSlope is { } g ? string.Create(CultureInfo.InvariantCulture, $"{(g > Landing.GlideSlope + 0.4 ? "steep" : g < Landing.GlideSlope - 0.4 ? "shallow" : "slope")} {g:0.#}°") : null,
+        FinalSpeed is { } v ? string.Create(CultureInfo.InvariantCulture, $"final {v:0} m/s") : null,
+    }.OfType<string>());
+}
+
+/// <summary>
+/// How one of its finals went: centerline crossings (weaving), how high it was 1 km out (m, + is high), and the glide
+/// slope it flew when the agent chose one (null: the normal 4°).
+/// </summary>
+public readonly record struct FinalReport(int Weaves, double High, double? Slope = null);
 
 /// <summary>
 /// The pilot's numbers for one plane. Defaults are the stock Aeris 3A's (the plane everything was tuned on).
@@ -50,7 +70,7 @@ public readonly record struct FinalReport(int Weaves, double High);
 public sealed record PlaneSetup(double PitchGain = 1, double RollGain = 1, double CruiseThrottle = 0.2, double RotateSpeed = 55,
     double ApproachSpeed = Landing.ApproachSpeed, double LandingSpeed = Landing.LandingSpeed, double CircuitSpeed = 120,
     double SinkCorrection = 6, string Why = "the Aeris 3A's numbers (no flight test)", double SteerGain = 1, double SlowingRate = 0.3,
-    double Braking = PlaneSetup.ReferenceBraking)
+    double Braking = PlaneSetup.ReferenceBraking, double SlopeCap = 6)
 {
     /// <summary>How much faster than the approach speed it may join the final (m/s): it slows down along the slope.</summary>
     public const double FastFinal = 20;
@@ -63,8 +83,40 @@ public sealed record PlaneSetup(double PitchGain = 1, double RollGain = 1, doubl
     /// down more on final). As fast as it can still slow to its landing speed by <see cref="SteadyFrom"/> at its
     /// <see cref="SlowingRate"/> (v² = landing² + 2·a·d), never more than its approach speed + <see cref="FastFinal"/>.
     /// </summary>
-    public double FinalSpeed(double toGo) =>
-        Math.Min(ApproachSpeed + FastFinal, Math.Sqrt(LandingSpeed * LandingSpeed + 2 * SlowingRate * Math.Max(0, toGo - SteadyFrom)));
+    /// <param name="style">An approach the agent chose (its final speed is a ceiling, within the plane's limits).</param>
+    public double FinalSpeed(double toGo, ApproachStyle? style = null)
+    {
+        // A steeper slope gives back more speed as it sinks (g·sin of the slope), so there's less to slow with.
+        var slope = style?.GlideSlope ?? Landing.GlideSlope;
+        var rate = Math.Max(0.1, SlowingRate - 0.6 * 9.81 * (Math.Sin(slope * Math.PI / 180) - Math.Sin(Landing.GlideSlope * Math.PI / 180)));
+        var ceiling = style?.FinalSpeed is { } asked ? Math.Clamp(asked, MinFinalSpeed, MaxFinalSpeed) : ApproachSpeed + FastFinal;
+        return Math.Min(ceiling, Math.Sqrt(LandingSpeed * LandingSpeed + 2 * rate * Math.Max(0, toGo - SteadyFrom)));
+    }
+
+    /// <summary>
+    /// The plane's final approach limits (its knowledge card): never slower than its landing speed (1.35× its slowest), no
+    /// faster than it can still slow down from (more for a plane that slows well), slopes from 3° up to what its
+    /// slowing allows (a plane that hardly slows can't come down steeply and stop).
+    /// </summary>
+    public double MinFinalSpeed => LandingSpeed;
+
+    public double MaxFinalSpeed => ApproachSpeed + FastFinal + (SlowingRate >= 0.6 ? 20 : 0);
+
+    /// <summary>
+    /// From how well it slows (the Aeris 3A, 0.31, stayed 40 m above a 5° slope at the decision point on every try in
+    /// the rig: 4.5°), and never more than its finals showed it can do (<see cref="SlopeCap"/>).
+    /// </summary>
+    public double MaxGlideSlope => Math.Min(SlopeCap, SlowingRate >= 0.6 ? 6 : SlowingRate >= 0.45 ? 5 : 4.5);
+
+    public const double MinGlideSlope = 3;
+
+    /// <summary>The style asked, within this plane's limits (and what was changed to fit).</summary>
+    public ApproachStyle Fit(ApproachStyle asked) => new(
+        asked.FinalSpeed is { } v ? Math.Clamp(v, MinFinalSpeed, MaxFinalSpeed) : null,
+        asked.GlideSlope is { } g ? Math.Clamp(g, MinGlideSlope, MaxGlideSlope) : null);
+
+    public string Limits() => string.Create(CultureInfo.InvariantCulture,
+        $"final approach {MinFinalSpeed:0}-{MaxFinalSpeed:0} m/s, touchdown {LandingSpeed:0} m/s, glide slope {MinGlideSlope:0}-{MaxGlideSlope:0.#}°");
 
     public static readonly PlaneSetup Default = new();
 
@@ -128,7 +180,15 @@ public sealed record PlaneSetup(double PitchGain = 1, double RollGain = 1, doubl
         }
         var last = (finals ?? []).TakeLast(5).ToList();
         var weaving = last.Count(f => f.Weaves >= WeavingFinal);
-        var high = last.Count(f => f.High > HighFinal);
+        // A steep final it chose that still arrived high: that slope is past this plane; half a degree less from now on
+        // (its knowledge card learns from its flights). Those don't count as the normal finals' "high".
+        var steepHigh = (finals ?? []).Where(f => f.Slope > Landing.GlideSlope + 0.4 && f.High > HighFinal).Select(f => f.Slope!.Value).ToList();
+        if (steepHigh.Count > 0)
+        {
+            setup = setup with { SlopeCap = Math.Max(Landing.GlideSlope, steepHigh.Min() - 0.5) };
+            why.Add($"{steepHigh.Count} steep final{(steepHigh.Count == 1 ? "" : "s")} too high");
+        }
+        var high = last.Count(f => f.High > HighFinal && !(f.Slope > Landing.GlideSlope + 0.4));
         if (weaving > 0)
         {
             setup = setup with { RollGain = Math.Round(Math.Max(0.3, setup.RollGain * Math.Pow(0.85, weaving)), 2) };

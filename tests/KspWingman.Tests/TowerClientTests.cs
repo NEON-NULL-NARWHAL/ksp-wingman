@@ -1,5 +1,6 @@
 // KSP Wingman · tests/KspWingman.Tests/TowerClientTests.cs
 // Flying for a tower: the hold's circle, and a route as the tower sends it (fixes in degrees) turned into Wingman's fixes.
+// Guide:   Meat and Potatoes/09-Tests-And-Tools.md
 
 using System.Text.Json.Nodes;
 using KspWingman.Mcp;

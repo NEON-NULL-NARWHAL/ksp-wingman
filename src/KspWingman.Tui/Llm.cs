@@ -1,5 +1,6 @@
 // KSP Wingman · src/KspWingman.Tui/Llm.cs
 // Talks to a model through the OpenAI-compatible chat API, which Ollama (/v1) and llama.cpp's server both speak.
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Net.Http.Json;
 using System.Text.Json;

@@ -2,6 +2,7 @@
 // Learning and free flight: the planner (a model that thinks, never touches the controls), the debrief after each
 // flight (one lesson, checked, saved on the server with the flight as evidence), and free flight (the planner picks
 // what to practise from a menu; code flies it inside a box around KSC).
+// Guide:   Meat and Potatoes/06-Console-And-Learning.md
 
 using System.Globalization;
 using System.Net.Http.Json;
@@ -113,7 +114,8 @@ public static partial class Debrief
         if (!m.Success)
             return null;
         var skill = Skill(m.Groups[1].Value, skills);
-        var lesson = Regex.Replace(m.Groups[2].Value, @"\s*\|\s*PLANE\b.*$", "", RegexOptions.IgnoreCase).Trim().Trim('"');
+        // A lesson never has a "|": what follows one is the answer's markers ("| PLANE", gemma4's "| Aeris 4A").
+        var lesson = m.Groups[2].Value.Split('|')[0].Trim().Trim('"');
         if (skill == null || lesson.Length is < 10 or > 200 || lesson.Contains('\n'))
             return null;
         // Advice, not a report: the rig's first "lesson" was "Landed 25m off centerline at 1021m down runway 09".
@@ -165,6 +167,9 @@ public static partial class FreeFlight
         new("fly-fast", "fly fast (220 m/s legs), then land", "fast"),
         new("fly-high", "climb above 5,000 m, then come down and land", "high"),
         new("new-craft", "fly and land a plane you haven't flown", "craft"),
+        // The free-will drills (0.12): the planner chooses where to go, and which final to try.
+        new("approaches", "try a riskier final of your choice (steep, shallow, fast, slow or long), then land", "variety"),
+        new("explore", "explore: fly out to places you choose, note what's there, come back and land", "explore"),
     ];
 
     /// <summary>What a training order means (the owner's "fly fast", "fly high", "work on landings", "try different planes").</summary>
@@ -173,6 +178,8 @@ public static partial class FreeFlight
         var w = words.Trim().ToLowerInvariant();
         if (w.Length == 0)
             return null;
+        if (w.Contains("explor") || w.Contains("map")) return ["explore"];
+        if (w.Contains("approach") || w.Contains("risk") || w.Contains("steep") || w.Contains("variety")) return ["approaches"];
         if (w.Contains("fast") || w.Contains("speed")) return ["fly-fast"];
         if (w.Contains("high") || w.Contains("altitude") || w.Contains("climb")) return ["fly-high"];
         if (w.Contains("plane") || w.Contains("craft") || w.Contains("aircraft")) return ["new-craft"];
