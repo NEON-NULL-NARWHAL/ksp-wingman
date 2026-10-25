@@ -26,6 +26,39 @@ public static class Exploring
     /// <summary>Without a known burn yet (the first minutes of a flight), no further from KSC than this (km).</summary>
     public const double UnknownBurnKm = 30;
 
+    /// <summary>
+    /// How far ahead the ground is checked in flight (km). The ground below alone was too late: in the rig (2026-10-25)
+    /// it rose 22 m/s toward a 1,717 m peak while the plane climbed 10, and a leg at 1,500 m flew into it.
+    /// </summary>
+    public static readonly double[] AheadKm = [0.5, 1, 2, 3, 4, 6, 8, 10, 12];
+
+    /// <summary>Points from <paramref name="from"/> on <paramref name="bearing"/>, at each of <paramref name="kms"/>.</summary>
+    public static IEnumerable<Geo> Along(double bodyRadius, Geo from, double bearing, IEnumerable<double> kms) =>
+        kms.Select(km => Move(bodyRadius, from, bearing, km, from.Altitude));
+
+    /// <summary>Every 1 km of a leg, and 2 km past its end (the plane flies on there).</summary>
+    public static IEnumerable<double> LegKm(double km) =>
+        Enumerable.Range(1, (int)Math.Ceiling(km) + 2).Select(i => (double)i);
+
+    /// <summary>The altitude to fly: what was asked, or higher to clear the highest ground by <see cref="MinClearance"/>.</summary>
+    public static double SafeAltitude(double wanted, IEnumerable<double> grounds) =>
+        Math.Max(wanted, grounds.DefaultIfEmpty(0).Max() + MinClearance);
+
+    /// <summary>
+    /// How steeply a plane is counted on to climb: 5 m per 100 m. The pilot settles near 9 m/s at 150 m/s (6 per 100);
+    /// in the rig (2026-10-25) a leg into mountains asked for 4,500 m from 2,800 and the plane hit a face 2 km on.
+    /// </summary>
+    public const double ClimbGradient = 0.05;
+
+    /// <summary>The first point (km on, its ground) that the plane can't clear by <see cref="MinClearance"/> climbing from <paramref name="altitude"/>, or null.</summary>
+    public static (double Km, double Ground)? TooSteep(double altitude, IEnumerable<(double Km, double Ground)> samples)
+    {
+        foreach (var (km, ground) in samples)
+            if (ground + MinClearance > altitude + km * 1000 * ClimbGradient)
+                return (km, ground);
+        return null;
+    }
+
     /// <summary>The point <paramref name="km"/> km from <paramref name="from"/> on <paramref name="bearing"/> (degrees).</summary>
     public static Geo Move(double bodyRadius, Geo from, double bearing, double km, double altitude)
     {

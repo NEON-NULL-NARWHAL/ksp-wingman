@@ -174,16 +174,30 @@ public sealed class FlightTools(KrpcLink krpc, Director director, TowerLink towe
         var g = vessel.Flight(vessel.Orbit.Body.ReferenceFrame);
         var radius = vessel.Orbit.Body.EquatorialRadius;
         var here = new Geo(g.Latitude, g.Longitude, g.MeanAltitude);
-        var target = Exploring.Move(radius, here, (bearing % 360 + 360) % 360, distanceKm, Math.Clamp(altitude, 300, 10_000));
+        var heading = (bearing % 360 + 360) % 360;
+        var target = Exploring.Move(radius, here, heading, distanceKm, Math.Clamp(altitude, 300, 10_000));
         if (Exploring.Check(radius, here, target, g.Speed, director.Fuel.Now) is { } why)
             return $"Not that leg: {why}.";
+        // The ground along the whole leg, before going: the leg's altitude clears its highest point.
+        var body = vessel.Orbit.Body;
+        var kms = Exploring.LegKm(Math.Clamp(distanceKm, 1, Exploring.MaxLegKm)).ToList();
+        var grounds = Exploring.Along(radius, here, heading, kms).Select(p => body.SurfaceHeight(p.Latitude, p.Longitude)).ToList();
+        if (Exploring.TooSteep(here.Altitude, kms.Zip(grounds)) is { } wall)
+            return string.Create(CultureInfo.InvariantCulture,
+                $"Not that leg: the ground rises to {wall.Ground:0} m {wall.Km:0} km on, more than the plane can climb from {here.Altitude:0} m ") +
+                "(about 5 m per 100 m). Pick another bearing, or a lower way round.";
+        var safe = Math.Min(Exploring.SafeAltitude(target.Altitude, grounds), 10_000);
+        var raised = safe > target.Altitude + 1
+            ? string.Create(CultureInfo.InvariantCulture, $" (raised from {target.Altitude:0} m: the ground on the way rises to {grounds.Max():0} m)")
+            : "";
+        target = target with { Altitude = safe };
         director.FlyTo(target, place =>
         {
             // The place goes to the events (and from there to the tower, for every agent).
             events.Add("place", $"Explored: {place.Describe(radius)}.", place);
-        });
+        }, why => events.Add("explore", why));
         return string.Create(CultureInfo.InvariantCulture,
-            $"Exploring: {distanceKm:0.#} km on {bearing:0}° at {target.Altitude:0} m, to a point {Exploring.FromKsc(radius, target.Latitude, target.Longitude)}.") +
+            $"Exploring: {distanceKm:0.#} km on {bearing:0}° at {target.Altitude:0} m{raised}, to a point {Exploring.FromKsc(radius, target.Latitude, target.Longitude)}.") +
             " On arrival it notes what's there (a \"place\" event) and flies on.";
     });
 

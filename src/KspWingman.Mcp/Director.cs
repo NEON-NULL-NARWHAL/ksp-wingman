@@ -187,13 +187,17 @@ public sealed class Director(string host, int port) : IDisposable
     private int _explored;
 
     /// <summary>
-    /// Explore: flies to <paramref name="target"/> (its altitude, at 150 m/s, never under 500 m above the ground below)
-    /// and once there calls <paramref name="arrived"/> with what it found, then flies on straight.
+    /// Explore: flies to <paramref name="target"/> (its altitude, at 150 m/s, never under 500 m above the ground below or
+    /// up to 12 km ahead) and once there calls <paramref name="arrived"/> with what it found, then flies on straight.
+    /// Ground ahead too steep to climb (where it's heading or where its nose points, in a turn): it turns for KSC and
+    /// says why through <paramref name="turnedBack"/>.
     /// </summary>
-    public void FlyTo(Geo target, Action<Place> arrived)
+    public void FlyTo(Geo target, Action<Place> arrived, Action<string>? turnedBack = null)
     {
         var there = false;
-        double heading = 0;
+        var back = false;
+        double heading = 0, aheadGround = 0;
+        var aheadAt = DateTime.MinValue;
         Start(link =>
         {
             var vessel = link.Run(c => c.SpaceCenter().ActiveVessel);
@@ -202,9 +206,9 @@ public sealed class Director(string host, int port) : IDisposable
             var me = new Geo(link.Run(_ => g.Latitude), link.Run(_ => g.Longitude), link.Run(_ => g.MeanAltitude));
             var ground = me.Altitude - link.Run(_ => g.SurfaceAltitude);
             var km = Exploring.DistanceKm(radius, me, target);
-            if (!there)
+            if (!there || back)
             {
-                var (n, e) = Formation.Offset(radius, me, target);
+                var (n, e) = Formation.Offset(radius, me, back ? Runway.Ksc.Threshold : target);
                 heading = (Math.Atan2(e, n) * 180 / Math.PI + 360) % 360;
             }
             if (!there && km * 1000 < Exploring.Arrived)
@@ -213,11 +217,34 @@ public sealed class Director(string host, int port) : IDisposable
                 Interlocked.Increment(ref _explored);
                 arrived(new Place(Math.Round(me.Latitude, 4), Math.Round(me.Longitude, 4), Math.Round(ground), link.Run(_ => vessel.Biome)));
             }
-            _doing = there
-                ? string.Create(CultureInfo.InvariantCulture, $"Exploring: at the point, flying on, heading {heading:0}°, {target.Altitude:0} m.")
-                : string.Create(CultureInfo.InvariantCulture, $"Exploring: {km:0.0} km to go, heading {heading:0}°, {target.Altitude:0} m.");
-            // Terrain under the plane: never lower than 500 m above it (the hills west of KSC rise to a few hundred meters).
-            return new PlaneTarget(heading, Math.Max(target.Altitude, ground + Exploring.MinClearance), 150);
+            // The ground below and up to 12 km ahead (looked up every 2 s): never lower than 500 m above any of it, so it
+            // climbs for a ridge early instead of once it's underneath.
+            if (DateTime.UtcNow - aheadAt > TimeSpan.FromSeconds(2))
+            {
+                aheadAt = DateTime.UtcNow;
+                var body = link.Run(_ => vessel.Orbit.Body);
+                var nose = link.Run(_ => g.Heading);
+                List<(double Km, double Ground)> Ahead(double bearing) => Exploring.AheadKm
+                    .Zip(Exploring.Along(radius, me, bearing, Exploring.AheadKm), (d, p) => (d, link.Run(_ => body.SurfaceHeight(p.Latitude, p.Longitude))))
+                    .ToList();
+                var toward = Ahead(heading);
+                // In a turn the nose sweeps across ground the line to the target never crosses (the rig's second crash).
+                var noseward = Math.Abs(((nose - heading) % 360 + 540) % 360 - 180) > 15 ? Ahead(nose) : toward;
+                aheadGround = toward.Concat(noseward).Max(a => a.Ground);
+                if (!back && (Exploring.TooSteep(me.Altitude, toward) ?? Exploring.TooSteep(me.Altitude, noseward)) is { } wall)
+                {
+                    back = true;
+                    turnedBack?.Invoke(string.Create(CultureInfo.InvariantCulture,
+                        $"Explore: turned back, the ground rises to {wall.Ground:0} m {wall.Km:0} km ahead, more than the plane can climb; heading for KSC."));
+                }
+            }
+            var altitude = Exploring.SafeAltitude(target.Altitude, [ground, aheadGround]);
+            _doing = back
+                ? string.Create(CultureInfo.InvariantCulture, $"Exploring: turned back (ground too high ahead), heading {heading:0}° for KSC, {altitude:0} m.")
+                : there
+                ? string.Create(CultureInfo.InvariantCulture, $"Exploring: at the point, flying on, heading {heading:0}°, {altitude:0} m.")
+                : string.Create(CultureInfo.InvariantCulture, $"Exploring: {km:0.0} km to go, heading {heading:0}°, {altitude:0} m.");
+            return new PlaneTarget(heading, altitude, 150);
         }, "Exploring: on the way.");
     }
 

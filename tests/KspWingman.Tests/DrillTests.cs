@@ -32,6 +32,28 @@ public sealed class DrillTests
     }
 
     [Fact]
+    public void Explore_clears_the_highest_ground_on_the_leg_and_ahead()
+    {
+        // The rig's crash (2026-10-25): a leg at 1,500 m toward a 1,717 m peak. Now it flies 2,217 m.
+        Assert.Equal(2217, Exploring.SafeAltitude(1500, [483, 835, 1176, 1717]));
+        Assert.Equal(1500, Exploring.SafeAltitude(1500, [0, 120, 261])); // low ground: as asked
+        Assert.Equal(1500, Exploring.SafeAltitude(1500, []));
+        // A 20 km leg is checked every km and 2 km past its end; ahead goes out to 12 km.
+        Assert.Equal(Enumerable.Range(1, 22).Select(i => (double)i), Exploring.LegKm(20));
+        Assert.Equal(12, Exploring.AheadKm.Max());
+        var points = Exploring.Along(Kerbin, Ksc, 90, [1, 12]).ToList();
+        Assert.InRange(Exploring.DistanceKm(Kerbin, Ksc, points[0]), 0.99, 1.01);
+        Assert.InRange(Exploring.DistanceKm(Kerbin, Ksc, points[1]), 11.9, 12.1);
+        Assert.True(points[1].Longitude > Ksc.Longitude); // east
+
+        // Climbing 5 m per 100 m: the first crash's leg (from 1,500 m, the peak 20 km on) can be climbed (to 2,217 m)...
+        Assert.Null(Exploring.TooSteep(1500, [(5, 483), (15, 1176), (20, 1717)]));
+        // ...the second crash's (from 2,830 m, ground rising to 3,750 m): too steep by 2 km on (2,600 m there needs 3,100). Refused, or turned back in flight.
+        Assert.Equal((2.0, 2600.0), Exploring.TooSteep(2830, [(1, 2200), (2, 2600), (3, 3750), (6, 3900)]));
+        Assert.Null(Exploring.TooSteep(3000, [(1, 0), (12, 0)])); // the sea
+    }
+
+    [Fact]
     public void The_fuel_gauge_measures_the_burn_and_starts_over_after_refuelling()
     {
         var gauge = new FuelGauge();

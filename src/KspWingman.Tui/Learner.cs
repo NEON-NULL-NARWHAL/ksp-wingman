@@ -305,12 +305,19 @@ public sealed class Learner(IToolHost tools, IPlanner planner, EventHub hub, Act
             (refused, refusals) = (null, 0);
             // There at 150 m/s, with room for the climb and the turn.
             var by = DateTime.UtcNow.AddSeconds(next.Km * 1000 / 150 * 1.5 + 90);
-            while (hub.After(mark, "place") == null && hub.After(mark, "outcome") == null && DateTime.UtcNow < by && !interrupted())
+            while (hub.After(mark, "place") == null && hub.After(mark, "outcome") == null && hub.After(mark, "explore") == null &&
+                   DateTime.UtcNow < by && !interrupted())
                 await Task.Delay(Poll, cancel);
             if (hub.After(mark, "outcome") != null)
                 return; // the flight ended (a crash)
             if (hub.After(mark, "place") is { } found)
                 say("free", found.Text);
+            else if (hub.After(mark, "explore") is { } back)
+            {
+                // Turned back from ground it can't climb: the planner hears why with the next leg.
+                say("free", back.Text);
+                refused = back.Text;
+            }
         }
     }
 
