@@ -3,7 +3,7 @@
 ## 0.12.1 (2026-10-25): explore clears the mountains
 
 ### Fixed
-- **Explore flew into mountains** (found by LUNA EVO Flight Lab's first rig run, twice): it only kept 500 m above the
+- **Explore flew into mountains** (found by KSP Flight Lab's first rig run, twice): it only kept 500 m above the
   ground directly below, too late for rising ground. Now `explore` checks the ground along the whole leg first and
   raises the leg's altitude to clear its highest point by 500 m, refuses a leg that rises faster than the plane can
   climb (with why, so the planner picks another), and in flight looks 12 km ahead (also where the nose points in a
